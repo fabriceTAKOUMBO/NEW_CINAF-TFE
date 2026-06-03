@@ -1,0 +1,17 @@
+controllers:
+    resource:
+        path: ../src/Controller/
+        namespace: App\Controller
+    type: attribute
+
+admin_controllers:
+    resource:
+        path: ../src/Admin/Controller/
+        namespace: App\Admin\Controller
+    type: attribute
+
+studio_controllers:
+    resource:
+        path: ../src/Studio/Controller/
+        namespace: App\Studio\Controller
+    type: attribute

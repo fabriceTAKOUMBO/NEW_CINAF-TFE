@@ -1,0 +1,75 @@
+security:
+    password_hashers:
+        App\Entity\User:
+            algorithm: auto
+
+    providers:
+        app_user_provider:
+            entity:
+                class: App\Entity\User
+                property: email
+
+    # Hiérarchie des rôles — décision Phase H (hardening) :
+    # ROLE_ADMIN n'hérite PAS de ROLE_CREATEUR. Séparation stricte : un admin
+    # qui veut accéder aux endpoints producteur doit explicitement avoir
+    # ROLE_CREATEUR (ce qui n'est pas le cas par défaut). Cela évite qu'un
+    # admin puisse modifier des contenus producteur via /api/producer/*
+    # sans contrôle d'ownership (les controllers Producer reposent sur
+    # `currentStudio = user.getStudio()` qui serait `null` pour un admin pur).
+    role_hierarchy:
+        ROLE_ABONNE: ROLE_USER
+        ROLE_CREATEUR: ROLE_USER
+        ROLE_MODERATEUR: ROLE_USER
+        # ROLE_ADMIN inclut MODERATEUR / ABONNE / USER mais PAS CREATEUR.
+        ROLE_ADMIN: [ROLE_MODERATEUR, ROLE_ABONNE, ROLE_USER]
+
+    firewalls:
+        dev:
+            pattern: ^/(_(profiler|wdt)|css|images|js)/
+            security: false
+
+        api:
+            pattern: ^/api
+            stateless: true
+            provider: app_user_provider
+            jwt: ~
+
+    access_control:
+        - { path: ^/api/auth/login, roles: PUBLIC_ACCESS }
+        - { path: ^/api/auth/register, roles: PUBLIC_ACCESS }
+        - { path: ^/api/auth/refresh, roles: PUBLIC_ACCESS }
+        - { path: ^/api/auth/forgot-password, roles: PUBLIC_ACCESS }
+        - { path: ^/api/auth/reset-password, roles: PUBLIC_ACCESS }
+        - { path: ^/api/auth/verify-email, roles: PUBLIC_ACCESS }
+        # Webhook Stripe — appelé par Stripe (server-to-server) avec signature HMAC. Public + signature vérifiée dans le contrôleur.
+        - { path: ^/api/stripe/webhook, roles: PUBLIC_ACCESS }
+        - { path: ^/api/auth/me, roles: IS_AUTHENTICATED_FULLY }
+        - { path: ^/api/auth/logout, roles: IS_AUTHENTICATED_FULLY }
+        - { path: ^/api/users, roles: IS_AUTHENTICATED_FULLY }
+        # Parcours self-service "Je suis producteur" — un utilisateur
+        # logué (ROLE_USER ou ROLE_ABONNE) doit pouvoir POST sur
+        # /api/studio/onboarding pour créer son studio. Cette exception
+        # DOIT être déclarée AVANT la règle générique `^/api/studio →
+        # ROLE_CREATEUR` (l'ordre compte dans access_control).
+        - { path: ^/api/studio/onboarding, roles: IS_AUTHENTICATED_FULLY }
+        # Endpoints publics des studios (vue « chaîne YouTube » côté visiteur).
+        # `^/api/studios` (avec un `s` final) couvre /api/studios, /api/studios/{slug},
+        # /api/studios/{slug}/works et /api/studios/search. La règle DOIT être
+        # placée AVANT la règle plus permissive `^/api/studio → ROLE_CREATEUR`
+        # qui matcherait sinon aussi /api/studios (préfixe partagé).
+        - { path: ^/api/studios, roles: PUBLIC_ACCESS }
+        # Phase H — défense en profondeur : `^/api/studio` exige ROLE_CREATEUR
+        # même si les controllers ont déjà `#[IsGranted('ROLE_CREATEUR')]`
+        # au niveau classe. Filet de sécurité au cas où l'attribut serait
+        # oublié sur un nouveau contrôleur ajouté dans `src/Producer/`.
+        - { path: ^/api/studio, roles: ROLE_CREATEUR }
+        - { path: ^/api/admin, roles: ROLE_ADMIN }
+
+when@test:
+    security:
+        password_hashers:
+            App\Entity\User:
+                algorithm: auto
+                cost: 4
+                time_cost: 3
+                memory_cost: 10

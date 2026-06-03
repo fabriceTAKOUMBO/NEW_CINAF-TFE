@@ -1,0 +1,1232 @@
+/* ============================================================
+   CINAF v2 — Styles globaux
+   Palette inspirée de cinaf.tv : tons sombres + accent doré
+   ============================================================ */
+
+/* ─── Variables CSS ─────────────────────────────────────────── */
+
+:root {
+  /* Fonds */
+  --cinaf-bg: #0a0a0a;
+  --cinaf-surface: #161616;
+  --cinaf-surface-2: #1f1f1f;
+
+  /* Accent principal */
+  --cinaf-gold: #c8a84b;
+  --cinaf-gold-hover: #d4b86a;
+  --cinaf-gold-light: rgba(200, 168, 75, 0.15);
+
+  /* Textes */
+  --cinaf-text: #e8e8e8;
+  --cinaf-text-muted: #888888;
+
+  /* Bordures */
+  --cinaf-border: #2a2a2a;
+  --cinaf-border-focus: #c8a84b;
+
+  /* États */
+  --cinaf-danger: #e74c3c;
+  --cinaf-success: #27ae60;
+
+  /* Ombres */
+  --cinaf-shadow: 0 4px 24px rgba(0, 0, 0, 0.6);
+  --cinaf-shadow-gold: 0 0 20px rgba(200, 168, 75, 0.2);
+
+  /* Compatibilité layout Next.js */
+  --background: var(--cinaf-bg);
+  --foreground: var(--cinaf-text);
+}
+
+/* ─── Reset & base ──────────────────────────────────────────── */
+
+html,
+body {
+  max-width: 100vw;
+  overflow-x: hidden;
+  color-scheme: dark;
+}
+
+body {
+  background-color: var(--cinaf-bg);
+  color: var(--cinaf-text);
+  font-family: "Inter", "Segoe UI", Arial, Helvetica, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  min-height: 100vh;
+}
+
+* {
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
+}
+
+a {
+  color: var(--cinaf-gold);
+  text-decoration: none;
+  transition: color 0.2s ease;
+}
+
+a:hover {
+  color: var(--cinaf-gold-hover);
+}
+
+/* ─── Overrides Bootstrap — Inputs sombres ──────────────────── */
+
+.form-control,
+.form-select {
+  background-color: var(--cinaf-surface-2) !important;
+  border-color: var(--cinaf-border) !important;
+  color: var(--cinaf-text) !important;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.form-control::placeholder {
+  color: var(--cinaf-text-muted) !important;
+  opacity: 1;
+}
+
+.form-control:focus,
+.form-select:focus {
+  background-color: var(--cinaf-surface-2) !important;
+  border-color: var(--cinaf-gold) !important;
+  box-shadow: 0 0 0 0.2rem rgba(200, 168, 75, 0.25) !important;
+  color: var(--cinaf-text) !important;
+  outline: none;
+}
+
+.form-label {
+  color: var(--cinaf-text-muted);
+  font-size: 0.875rem;
+  font-weight: 500;
+  margin-bottom: 0.4rem;
+}
+
+.form-check-input {
+  background-color: var(--cinaf-surface-2) !important;
+  border-color: var(--cinaf-border) !important;
+}
+
+.form-check-input:checked {
+  background-color: var(--cinaf-gold) !important;
+  border-color: var(--cinaf-gold) !important;
+}
+
+.form-check-input:focus {
+  box-shadow: 0 0 0 0.2rem rgba(200, 168, 75, 0.25) !important;
+}
+
+.form-check-label {
+  color: var(--cinaf-text-muted);
+  font-size: 0.875rem;
+}
+
+/* ─── Overrides Bootstrap — Boutons ─────────────────────────── */
+
+.btn-cinaf {
+  background-color: var(--cinaf-gold);
+  border-color: var(--cinaf-gold);
+  color: #000 !important;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  transition: background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.btn-cinaf:hover,
+.btn-cinaf:focus {
+  background-color: var(--cinaf-gold-hover);
+  border-color: var(--cinaf-gold-hover);
+  color: #000 !important;
+  box-shadow: var(--cinaf-shadow-gold);
+}
+
+.btn-cinaf:disabled,
+.btn-cinaf.disabled {
+  background-color: var(--cinaf-gold);
+  border-color: var(--cinaf-gold);
+  opacity: 0.55;
+}
+
+.btn-cinaf-outline {
+  background-color: transparent;
+  border: 1.5px solid var(--cinaf-gold);
+  color: var(--cinaf-gold) !important;
+  font-weight: 600;
+  transition: all 0.2s ease;
+}
+
+.btn-cinaf-outline:hover,
+.btn-cinaf-outline:focus {
+  background-color: var(--cinaf-gold);
+  color: #000 !important;
+}
+
+/* ─── Cartes de formulaires (auth) ──────────────────────────── */
+
+.cinaf-card {
+  background-color: var(--cinaf-surface);
+  border: 1px solid var(--cinaf-border);
+  border-radius: 12px;
+  box-shadow: var(--cinaf-shadow);
+}
+
+/* ─── Navbar ─────────────────────────────────────────────────── */
+
+.cinaf-navbar {
+  background-color: #111111 !important;
+  border-bottom: 1px solid var(--cinaf-border);
+  padding: 0.75rem 0;
+}
+
+.cinaf-navbar .navbar-brand {
+  font-size: 1.6rem;
+  font-weight: 900;
+  color: var(--cinaf-gold) !important;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+}
+
+.cinaf-navbar .nav-link {
+  color: var(--cinaf-text-muted) !important;
+  font-weight: 500;
+  font-size: 0.9rem;
+  padding: 0.5rem 1rem !important;
+  transition: color 0.2s ease;
+}
+
+.cinaf-navbar .nav-link:hover,
+.cinaf-navbar .nav-link.active {
+  color: var(--cinaf-text) !important;
+}
+
+.cinaf-navbar .navbar-toggler {
+  border-color: var(--cinaf-border) !important;
+}
+
+.cinaf-navbar .navbar-toggler-icon {
+  filter: invert(1);
+}
+
+/* ─── Dropdown ───────────────────────────────────────────────── */
+
+.dropdown-menu {
+  background-color: var(--cinaf-surface) !important;
+  border-color: var(--cinaf-border) !important;
+  box-shadow: var(--cinaf-shadow);
+}
+
+.dropdown-item {
+  color: var(--cinaf-text) !important;
+  font-size: 0.9rem;
+  transition: background-color 0.15s ease;
+}
+
+.dropdown-item:hover,
+.dropdown-item:focus {
+  background-color: var(--cinaf-surface-2) !important;
+  color: var(--cinaf-gold) !important;
+}
+
+.dropdown-divider {
+  border-color: var(--cinaf-border) !important;
+}
+
+/* ─── Alerts ─────────────────────────────────────────────────── */
+
+.alert-cinaf-error {
+  background-color: rgba(231, 76, 60, 0.15);
+  border: 1px solid rgba(231, 76, 60, 0.4);
+  color: #f1948a;
+  border-radius: 8px;
+}
+
+.alert-cinaf-success {
+  background-color: rgba(39, 174, 96, 0.15);
+  border: 1px solid rgba(39, 174, 96, 0.4);
+  color: #6fcf97;
+  border-radius: 8px;
+}
+
+/* ─── Pages Auth — fond pleine page ─────────────────────────── */
+
+.auth-page {
+  min-height: 100vh;
+  background-color: var(--cinaf-bg);
+  background-image:
+    radial-gradient(ellipse at 20% 50%, rgba(200, 168, 75, 0.04) 0%, transparent 60%),
+    radial-gradient(ellipse at 80% 20%, rgba(200, 168, 75, 0.03) 0%, transparent 50%),
+    linear-gradient(180deg, #0a0a0a 0%, #111111 50%, #0a0a0a 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem 1rem;
+}
+
+/* ─── Logo CINAF stylisé ─────────────────────────────────────── */
+
+.cinaf-logo-text {
+  font-size: 2rem;
+  font-weight: 900;
+  letter-spacing: 4px;
+  color: var(--cinaf-gold);
+  text-transform: uppercase;
+  line-height: 1;
+}
+
+.cinaf-logo-text span {
+  color: var(--cinaf-text);
+}
+
+/* ─── Footer ─────────────────────────────────────────────────── */
+
+.cinaf-footer {
+  background-color: #0d0d0d;
+  border-top: 1px solid var(--cinaf-border);
+  padding: 2.5rem 0 1.5rem;
+}
+
+.cinaf-footer .footer-logo {
+  font-size: 1.4rem;
+  font-weight: 900;
+  letter-spacing: 3px;
+  color: var(--cinaf-gold);
+  text-transform: uppercase;
+}
+
+.cinaf-footer .footer-tagline {
+  color: var(--cinaf-text-muted);
+  font-size: 0.85rem;
+  margin-top: 0.25rem;
+}
+
+.cinaf-footer a {
+  color: var(--cinaf-text-muted);
+  font-size: 0.875rem;
+  transition: color 0.2s ease;
+}
+
+.cinaf-footer a:hover {
+  color: var(--cinaf-gold);
+}
+
+/* ─── Avatar initiales ──────────────────────────────────────── */
+
+.cinaf-avatar {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--cinaf-gold), #a07830);
+  color: #000;
+  font-weight: 700;
+  font-size: 1.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+
+/* ─── Modal sombre ───────────────────────────────────────────── */
+
+.modal-content {
+  background-color: var(--cinaf-surface) !important;
+  border-color: var(--cinaf-border) !important;
+  color: var(--cinaf-text) !important;
+}
+
+.modal-header,
+.modal-footer {
+  border-color: var(--cinaf-border) !important;
+}
+
+/* ─── Input password toggle ──────────────────────────────────── */
+
+.password-toggle-btn {
+  background-color: var(--cinaf-surface-2) !important;
+  border-color: var(--cinaf-border) !important;
+  color: var(--cinaf-text-muted) !important;
+  transition: color 0.2s ease;
+}
+
+.password-toggle-btn:hover {
+  color: var(--cinaf-gold) !important;
+}
+
+/* ─── Badge rôle ─────────────────────────────────────────────── */
+
+.cinaf-role-badge {
+  display: inline-block;
+  padding: 0.25rem 0.75rem;
+  border-radius: 20px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  background-color: var(--cinaf-gold-light);
+  color: var(--cinaf-gold);
+  border: 1px solid rgba(200, 168, 75, 0.3);
+  text-transform: uppercase;
+}
+
+/* ─── Scrollbar custom ───────────────────────────────────────── */
+
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--cinaf-surface);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--cinaf-border);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--cinaf-text-muted);
+}
+
+/* ─── Content Card ─────────────────────────────────────────── */
+
+.content-card {
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid var(--cinaf-border);
+  background-color: var(--cinaf-surface);
+  transition: transform 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
+  cursor: pointer;
+}
+
+.content-card:hover {
+  transform: scale(1.02);
+  border-color: var(--cinaf-gold);
+  box-shadow: var(--cinaf-shadow-gold);
+}
+
+.content-card-poster {
+  position: relative;
+  aspect-ratio: 2 / 3;
+  overflow: hidden;
+  background-color: var(--cinaf-surface-2);
+}
+
+.content-card-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.content-card-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--cinaf-surface-2);
+}
+
+.content-card-overlay {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 2rem 0.75rem 0.75rem;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.9) 0%, rgba(0, 0, 0, 0.5) 60%, transparent 100%);
+}
+
+.content-card-title {
+  color: #fff;
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin-bottom: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.content-card-year {
+  color: var(--cinaf-text-muted);
+  font-size: 0.72rem;
+}
+
+.content-card-genre {
+  color: var(--cinaf-gold);
+  font-size: 0.68rem;
+  font-weight: 600;
+  background-color: var(--cinaf-gold-light);
+  padding: 1px 8px;
+  border-radius: 10px;
+}
+
+.content-card-duration {
+  color: var(--cinaf-text-muted);
+  font-size: 0.72rem;
+}
+
+/* ─── Hero Banner ──────────────────────────────────────────── */
+
+.hero-banner {
+  position: relative;
+  min-height: 60vh;
+  background-size: cover;
+  background-position: center top;
+  background-repeat: no-repeat;
+  background-color: var(--cinaf-surface);
+}
+
+@media (max-width: 768px) {
+  .hero-banner {
+    min-height: 40vh;
+  }
+}
+
+.hero-banner-overlay {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    to top,
+    rgba(10, 10, 10, 1) 0%,
+    rgba(10, 10, 10, 0.85) 30%,
+    rgba(10, 10, 10, 0.4) 60%,
+    rgba(10, 10, 10, 0.2) 100%
+  );
+}
+
+/* ─── Carousel Section ─────────────────────────────────────── */
+
+.carousel-section {
+  margin-bottom: 2.5rem;
+}
+
+.carousel-scroll {
+  display: flex;
+  gap: 1rem;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  padding-bottom: 0.5rem;
+}
+
+.carousel-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.carousel-item-wrapper {
+  flex: 0 0 180px;
+  scroll-snap-align: start;
+}
+
+@media (max-width: 576px) {
+  .carousel-item-wrapper {
+    flex: 0 0 140px;
+  }
+}
+
+.carousel-arrow {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 1px solid var(--cinaf-border) !important;
+  background-color: var(--cinaf-surface) !important;
+  color: var(--cinaf-text) !important;
+  padding: 0 !important;
+  transition: all 0.2s ease;
+}
+
+.carousel-arrow:hover {
+  border-color: var(--cinaf-gold) !important;
+  color: var(--cinaf-gold) !important;
+}
+
+/* ─── Filter Chips ─────────────────────────────────────────── */
+
+.filter-chip {
+  display: inline-block;
+  padding: 5px 14px;
+  border-radius: 20px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  border: 1px solid var(--cinaf-border);
+  background-color: transparent;
+  color: var(--cinaf-text-muted);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.2s ease;
+}
+
+.filter-chip:hover {
+  border-color: var(--cinaf-gold);
+  color: var(--cinaf-text);
+}
+
+.filter-chip.active {
+  background-color: var(--cinaf-gold);
+  border-color: var(--cinaf-gold);
+  color: #000;
+  font-weight: 600;
+}
+
+/* ─── Pagination CINAF ─────────────────────────────────────── */
+
+.cinaf-pagination .page-link {
+  background-color: var(--cinaf-surface) !important;
+  border-color: var(--cinaf-border) !important;
+  color: var(--cinaf-text-muted) !important;
+  font-size: 0.85rem;
+  transition: all 0.2s ease;
+}
+
+.cinaf-pagination .page-link:hover {
+  background-color: var(--cinaf-surface-2) !important;
+  color: var(--cinaf-gold) !important;
+  border-color: var(--cinaf-gold) !important;
+}
+
+.cinaf-pagination .page-item.active .page-link {
+  background-color: var(--cinaf-gold) !important;
+  border-color: var(--cinaf-gold) !important;
+  color: #000 !important;
+  font-weight: 600;
+}
+
+.cinaf-pagination .page-item.disabled .page-link {
+  background-color: var(--cinaf-surface) !important;
+  border-color: var(--cinaf-border) !important;
+  color: var(--cinaf-text-muted) !important;
+  opacity: 0.4;
+}
+
+/* ─── Section Titles ───────────────────────────────────────── */
+
+.section-title {
+  color: var(--cinaf-gold);
+  font-weight: 700;
+  font-size: 1.5rem;
+  margin-bottom: 1.5rem;
+  position: relative;
+  padding-bottom: 0.5rem;
+}
+
+.section-title::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 50px;
+  height: 3px;
+  background: var(--cinaf-gold);
+  border-radius: 2px;
+}
+
+/* ─── Watch Page ───────────────────────────────────────────── */
+
+.watch-page {
+  background-color: #000;
+  min-height: 100vh;
+}
+
+/* ─── Film/Serie Detail Page ───────────────────────────────── */
+
+.detail-banner {
+  position: relative;
+  min-height: 50vh;
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+
+.detail-banner-overlay {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    to top,
+    var(--cinaf-bg) 0%,
+    rgba(10, 10, 10, 0.9) 40%,
+    rgba(10, 10, 10, 0.5) 100%
+  );
+}
+
+.genre-badge {
+  display: inline-block;
+  padding: 3px 12px;
+  border-radius: 20px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  background-color: var(--cinaf-gold-light);
+  color: var(--cinaf-gold);
+  border: 1px solid rgba(200, 168, 75, 0.3);
+}
+
+.person-card {
+  text-align: center;
+  padding: 0.75rem;
+}
+
+.person-photo {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 2px solid var(--cinaf-border);
+  margin-bottom: 0.5rem;
+}
+
+.person-photo-placeholder {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  background-color: var(--cinaf-surface-2);
+  border: 2px solid var(--cinaf-border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 0.5rem;
+}
+
+/* ─── Accordion for Seasons ────────────────────────────────── */
+
+.accordion-cinaf .accordion-button {
+  background-color: var(--cinaf-surface) !important;
+  color: var(--cinaf-text) !important;
+  border: none;
+  box-shadow: none !important;
+  font-weight: 600;
+}
+
+.accordion-cinaf .accordion-button::after {
+  filter: invert(0.8);
+}
+
+.accordion-cinaf .accordion-button:not(.collapsed) {
+  background-color: var(--cinaf-surface-2) !important;
+  color: var(--cinaf-gold) !important;
+}
+
+.accordion-cinaf .accordion-body {
+  background-color: var(--cinaf-surface);
+  border-top: 1px solid var(--cinaf-border);
+}
+
+.accordion-cinaf .accordion-item {
+  background-color: var(--cinaf-surface);
+  border-color: var(--cinaf-border) !important;
+}
+
+.episode-row {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.75rem 0;
+  border-bottom: 1px solid var(--cinaf-border);
+  transition: background-color 0.15s ease;
+}
+
+.episode-row:last-child {
+  border-bottom: none;
+}
+
+.episode-row:hover {
+  background-color: var(--cinaf-surface-2);
+}
+
+/* ─── Detail Hero (cinaf.tv style) ─────────────────────────── */
+
+.detail-hero {
+  position: relative;
+  min-height: 60vh;
+  background-size: cover;
+  background-position: center top;
+  background-repeat: no-repeat;
+  display: flex;
+  align-items: flex-end;
+  padding-top: 6rem;
+  padding-bottom: 2.5rem;
+}
+
+.detail-hero::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  backdrop-filter: blur(2px);
+  background: rgba(10, 10, 10, 0.35);
+}
+
+.detail-hero-overlay {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(180deg, rgba(10, 10, 10, 0.1) 0%, rgba(10, 10, 10, 0.85) 65%, var(--cinaf-bg) 100%),
+    linear-gradient(90deg, rgba(10, 10, 10, 0.75) 0%, rgba(10, 10, 10, 0.1) 60%);
+}
+
+.detail-hero-content {
+  position: relative;
+  z-index: 2;
+  width: 100%;
+}
+
+.detail-poster {
+  aspect-ratio: 2 / 3;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid var(--cinaf-border);
+  box-shadow: var(--cinaf-shadow);
+  background-color: var(--cinaf-surface);
+}
+
+.detail-poster img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.detail-poster-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--cinaf-surface-2);
+  color: var(--cinaf-text-muted);
+  font-size: 4rem;
+}
+
+.detail-title {
+  color: var(--cinaf-text);
+  font-weight: 800;
+  font-size: clamp(1.75rem, 4vw, 2.75rem);
+  margin: 0.5rem 0;
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.6);
+}
+
+.detail-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.75rem;
+  color: var(--cinaf-text-muted);
+  font-size: 0.9rem;
+  margin-bottom: 0.75rem;
+}
+
+.detail-meta .meta-sep {
+  color: var(--cinaf-border);
+}
+
+.detail-genres {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 1.25rem;
+}
+
+.detail-actions {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-top: 0.5rem;
+}
+
+/* ─── Detail Body (synopsis + aside) ───────────────────────── */
+
+.detail-body {
+  padding: 2.5rem 1rem 3rem;
+}
+
+.detail-section {
+  margin-bottom: 2.5rem;
+}
+
+.detail-section-title {
+  color: var(--cinaf-gold);
+  font-weight: 600;
+  font-size: 1.1rem;
+  margin-bottom: 1rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--cinaf-border);
+}
+
+.detail-synopsis {
+  color: var(--cinaf-text);
+  line-height: 1.75;
+  font-size: 1rem;
+}
+
+.detail-aside {
+  position: sticky;
+  top: 90px;
+  background-color: var(--cinaf-surface);
+  border: 1px solid var(--cinaf-border);
+  border-radius: 12px;
+  padding: 1.5rem;
+}
+
+.detail-techsheet {
+  margin: 0;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.5rem 1rem;
+  font-size: 0.9rem;
+}
+
+.detail-techsheet dt {
+  color: var(--cinaf-text-muted);
+  font-weight: 500;
+}
+
+.detail-techsheet dd {
+  color: var(--cinaf-text);
+  margin: 0;
+}
+
+.person-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.person-name {
+  color: var(--cinaf-text);
+  font-size: 0.8rem;
+  margin: 0;
+}
+
+/* ─── Season Tabs ──────────────────────────────────────────── */
+
+.season-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.season-tab {
+  padding: 0.4rem 1rem;
+  border-radius: 999px;
+  background-color: var(--cinaf-surface);
+  border: 1px solid var(--cinaf-border);
+  color: var(--cinaf-text-muted);
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.season-tab:hover {
+  border-color: var(--cinaf-gold);
+  color: var(--cinaf-gold);
+}
+
+.season-tab.active {
+  background-color: var(--cinaf-gold);
+  border-color: var(--cinaf-gold);
+  color: #000;
+}
+
+.season-subtitle {
+  color: var(--cinaf-text);
+  font-weight: 600;
+  margin: 0 0 0.25rem;
+}
+
+.season-synopsis {
+  color: var(--cinaf-text-muted);
+  font-size: 0.9rem;
+  margin-bottom: 1rem;
+}
+
+/* ─── Episode Grid (cards 16/9) ────────────────────────────── */
+
+.episode-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 1.25rem;
+}
+
+.episode-card {
+  display: flex;
+  flex-direction: column;
+  text-decoration: none;
+  background-color: var(--cinaf-surface);
+  border: 1px solid var(--cinaf-border);
+  border-radius: 10px;
+  overflow: hidden;
+  transition: all 0.2s ease;
+}
+
+.episode-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--cinaf-gold);
+  box-shadow: var(--cinaf-shadow-gold);
+}
+
+.episode-card-thumb {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  background-size: cover;
+  background-position: center;
+  background-color: var(--cinaf-surface-2);
+}
+
+.episode-card-overlay {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, transparent 30%, rgba(0, 0, 0, 0.7) 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.episode-card:hover .episode-card-overlay {
+  opacity: 1;
+}
+
+.episode-card-play {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background-color: var(--cinaf-gold);
+  color: #000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 2rem;
+}
+
+.episode-card-number {
+  position: absolute;
+  top: 0.5rem;
+  left: 0.5rem;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background-color: rgba(0, 0, 0, 0.75);
+  color: var(--cinaf-gold);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+
+.episode-card-duration {
+  position: absolute;
+  bottom: 0.5rem;
+  right: 0.5rem;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background-color: rgba(0, 0, 0, 0.75);
+  color: #fff;
+  font-size: 0.7rem;
+  font-weight: 500;
+}
+
+.episode-card-body {
+  padding: 0.75rem 0.9rem 0.9rem;
+}
+
+.episode-card-title {
+  color: var(--cinaf-text);
+  font-weight: 600;
+  font-size: 0.95rem;
+  margin: 0 0 0.35rem;
+  line-height: 1.3;
+}
+
+.episode-card-synopsis {
+  color: var(--cinaf-text-muted);
+  font-size: 0.82rem;
+  line-height: 1.5;
+  margin: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* ─── Watch Page Layout ────────────────────────────────────── */
+
+.watch-topbar {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.6rem 1rem;
+  background-color: rgba(0, 0, 0, 0.85);
+  border-bottom: 1px solid var(--cinaf-border);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.watch-back {
+  color: var(--cinaf-text-muted);
+  font-size: 0.85rem;
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.watch-back:hover {
+  color: var(--cinaf-gold);
+}
+
+.watch-title {
+  color: var(--cinaf-text);
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+.watch-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 1.5rem;
+  max-width: 1600px;
+  margin: 0 auto;
+  padding: 1rem;
+}
+
+@media (max-width: 1100px) {
+  .watch-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.watch-player-col {
+  min-width: 0;
+}
+
+.watch-player-col-full {
+  grid-column: 1 / -1;
+  max-width: 1200px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.watch-meta {
+  padding: 1.25rem 0.25rem 0;
+}
+
+.watch-meta-title {
+  color: var(--cinaf-text);
+  font-weight: 700;
+  font-size: 1.3rem;
+  margin: 0 0 0.35rem;
+}
+
+.watch-meta-line {
+  color: var(--cinaf-text-muted);
+  font-size: 0.88rem;
+  margin: 0 0 0.75rem;
+}
+
+.watch-meta-synopsis {
+  color: var(--cinaf-text);
+  line-height: 1.65;
+  margin-top: 0.5rem;
+}
+
+.watch-nav {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  margin-top: 1.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--cinaf-border);
+}
+
+/* ─── Watch Sidebar (liste des épisodes) ───────────────────── */
+
+.watch-sidebar {
+  background-color: var(--cinaf-surface);
+  border: 1px solid var(--cinaf-border);
+  border-radius: 10px;
+  padding: 1rem;
+  max-height: calc(100vh - 120px);
+  overflow-y: auto;
+  position: sticky;
+  top: 70px;
+}
+
+.watch-sidebar-title {
+  color: var(--cinaf-gold);
+  font-weight: 600;
+  font-size: 0.95rem;
+  margin: 0 0 0.75rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.watch-sidebar-count {
+  color: var(--cinaf-text-muted);
+  font-size: 0.75rem;
+  font-weight: 400;
+}
+
+.watch-episode-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.watch-episode-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.6rem 0.75rem;
+  border-radius: 6px;
+  text-decoration: none;
+  border: 1px solid transparent;
+  transition: all 0.15s ease;
+}
+
+.watch-episode-item:hover {
+  background-color: var(--cinaf-surface-2);
+  border-color: var(--cinaf-border);
+}
+
+.watch-episode-item.active {
+  background-color: var(--cinaf-gold-light);
+  border-color: rgba(200, 168, 75, 0.3);
+}
+
+.watch-episode-num {
+  color: var(--cinaf-gold);
+  font-weight: 700;
+  font-size: 0.85rem;
+  min-width: 24px;
+  text-align: center;
+}
+
+.watch-episode-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.watch-episode-title {
+  color: var(--cinaf-text);
+  font-size: 0.88rem;
+  font-weight: 500;
+  margin: 0 0 0.15rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.watch-episode-meta {
+  color: var(--cinaf-text-muted);
+  font-size: 0.72rem;
+  margin: 0;
+}
+
+.watch-episode-playing {
+  color: var(--cinaf-gold);
+  font-size: 1.2rem;
+}

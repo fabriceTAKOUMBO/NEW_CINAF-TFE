@@ -1,0 +1,9 @@
+# Flysystem — storage local uniquement.
+# NOTE : le stockage Bunny passe par BunnyStorageService (API REST native Bunny, via Guzzle).
+# La Storage Zone Bunny n'a pas l'API S3 activée par défaut → on n'utilise plus Flysystem/S3.
+flysystem:
+    storages:
+        default.storage:
+            adapter: 'local'
+            options:
+                directory: '%kernel.project_dir%/var/storage/default'

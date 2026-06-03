@@ -1,0 +1,99 @@
+# This file is the entry point to configure your own services.
+# Files in the packages/ subdirectory configure your dependencies.
+
+parameters:
+    # Bunny Storage — endpoint et CA bundle partagés par toutes les zones.
+    app.bunny.endpoint: '%env(BUNNY_ENDPOINT)%'
+    app.bunny.ca_bundle: '%kernel.project_dir%/config/certs/cacert.pem'
+    app.bunny.default_zone: '%env(BUNNY_DEFAULT_ZONE)%'
+
+    # Zone source du catalogue public (peut diverger de default_zone à terme).
+    app.bunny.catalogue_zone: '%env(BUNNY_CATALOGUE_ZONE)%'
+
+    # Source du catalogue public (Phase F — Agent 5).
+    # Valeurs : 'bunny' (default, rollback safe) | 'db' (alimenté par les entités).
+    app.catalogue.source: '%env(CATALOGUE_SOURCE)%'
+
+    # Stripe — bascule mock <-> Checkout réel. Le code vit avec STRIPE_ENABLED=false sans clés (mode démo TFE / suite tests).
+    app.stripe.enabled: '%env(bool:STRIPE_ENABLED)%'
+    app.stripe.secret_key: '%env(STRIPE_SECRET_KEY)%'
+    app.stripe.webhook_secret: '%env(STRIPE_WEBHOOK_SECRET)%'
+    app.stripe.success_url: '%env(STRIPE_SUCCESS_URL)%'
+    app.stripe.cancel_url: '%env(STRIPE_CANCEL_URL)%'
+
+    # Map des Storage Zones disponibles.
+    # Pour ajouter une zone : déclarer sa AccessKey dans .env.local et l'ajouter ici.
+    app.bunny.zones:
+        backupcinaf:
+            accessKey: '%env(BUNNY_ZONE_BACKUPCINAF_KEY)%'
+            cdnBaseUrl: 'https://backupcinaf.b-cdn.net'
+        cinaftvseries:
+            accessKey: '%env(BUNNY_ZONE_CINAFTVSERIES_KEY)%'
+            cdnBaseUrl: 'https://cinaftvseries.b-cdn.net'
+        cinaftvfilms:
+            accessKey: '%env(BUNNY_ZONE_CINAFTVFILMS_KEY)%'
+            cdnBaseUrl: 'https://cinaftvfilms.b-cdn.net'
+        cinaftv-movies:
+            accessKey: '%env(BUNNY_ZONE_CINAFTV_MOVIES_KEY)%'
+            cdnBaseUrl: 'https://cinaftv-movies.b-cdn.net'
+
+services:
+    # default configuration for services in *this* file
+    _defaults:
+        autowire: true      # Automatically injects dependencies in your services.
+        autoconfigure: true # Automatically registers your services as commands, event subscribers, etc.
+
+    # makes classes in src/ available to be used as services
+    App\:
+        resource: '../src/'
+        exclude:
+            - '../src/DependencyInjection/'
+            - '../src/Entity/'
+            - '../src/Kernel.php'
+
+    # Décorateur OpenAPI — ajoute les routes custom (Auth, Users, Catalogue) à la doc Swagger
+    App\OpenApi\OpenApiFactory:
+        decorates: 'api_platform.openapi.factory'
+        arguments: ['@.inner']
+
+    # BunnyStorageService est instancié à la demande par BunnyZoneRegistry,
+    # pas par l'autowire global (chaque zone a sa propre AccessKey).
+    App\Service\BunnyStorageService:
+        autowire: false
+        autoconfigure: false
+        public: false
+
+    # Registry des Storage Zones Bunny.
+    App\Service\BunnyZoneRegistry:
+        arguments:
+            $endpoint: '%app.bunny.endpoint%'
+            $caBundle: '%app.bunny.ca_bundle%'
+            $zones: '%app.bunny.zones%'
+            $defaultZone: '%app.bunny.default_zone%'
+
+    # Catalogue public alimenté depuis la zone Bunny `cinaftv-movies`.
+    App\Service\BunnyCatalogueService:
+        arguments:
+            $catalogueZone: '%app.bunny.catalogue_zone%'
+            $cache: '@cache.app'
+
+    # Contrôleur catalogue public — feature flag CATALOGUE_SOURCE injecté.
+    App\Controller\CatalogueDiscoverController:
+        arguments:
+            $catalogueSource: '%app.catalogue.source%'
+            $catalogueZone: '%app.bunny.catalogue_zone%'
+        tags: ['controller.service_arguments']
+
+    # Stripe — wrapper léger autour de stripe-php. Instancié uniquement quand STRIPE_ENABLED=true.
+    App\Service\StripeService:
+        arguments:
+            $secretKey: '%app.stripe.secret_key%'
+            $webhookSecret: '%app.stripe.webhook_secret%'
+            $successUrl: '%app.stripe.success_url%'
+            $cancelUrl: '%app.stripe.cancel_url%'
+            $enabled: '%app.stripe.enabled%'
+
+    App\Controller\SubscriptionController:
+        arguments:
+            $stripeEnabled: '%app.stripe.enabled%'
+        tags: ['controller.service_arguments']
