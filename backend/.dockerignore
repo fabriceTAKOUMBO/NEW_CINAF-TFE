@@ -1,0 +1,9 @@
+# Exclut de l'image tout ce qui doit être régénéré ou rester secret.
+/var/
+/vendor/
+/.env.local
+/.env.*.local
+/config/jwt/*.pem
+/tests/
+.git
+# NB : config/certs/cacert.pem N'EST PAS exclu — il est requis pour les appels HTTPS Bunny.

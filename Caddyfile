@@ -1,0 +1,12 @@
+# Reverse-proxy frontal : termine le HTTPS (certificats Let's Encrypt automatiques)
+# et route chaque domaine vers le bon conteneur.
+
+# Frontend Next.js
+tnext.be {
+	reverse_proxy frontend:3000
+}
+
+# API Symfony
+api.tnext.be {
+	reverse_proxy backend:80
+}

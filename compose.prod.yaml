@@ -1,0 +1,33 @@
+# Orchestration de production — 3 conteneurs sur le VPS.
+# La base de données n'est PAS ici : on utilise le CloudDB OVH managé (voir DATABASE_URL dans backend/.env.local).
+
+services:
+  backend:
+    build: ./backend
+    env_file: ./backend/.env.local          # secrets + config (NON versionné, créé sur le serveur)
+    volumes:
+      - jwt_data:/app/config/jwt            # clés JWT persistées hors image
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data                    # certificats Let's Encrypt (à conserver)
+      - caddy_config:/config
+    depends_on:
+      - backend
+      - frontend
+    restart: unless-stopped
+
+volumes:
+  jwt_data:
+  caddy_data:
+  caddy_config:

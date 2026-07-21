@@ -1,0 +1,6 @@
+# Ne pas copier les artefacts locaux dans l'image (ils sont régénérés au build).
+# NB : .env.production N'EST PAS exclu — Next.js le lit au build pour les NEXT_PUBLIC_*.
+node_modules
+.next
+.git
+Dockerfile
