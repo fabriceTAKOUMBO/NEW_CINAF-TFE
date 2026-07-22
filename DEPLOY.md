@@ -123,11 +123,17 @@ docker compose -f compose.prod.yaml exec backend php bin/console doctrine:query:
   "INSERT INTO \"user\" (id, email, roles, password, first_name, last_name, is_verified, created_at, updated_at) \
    VALUES (gen_random_uuid(), 'admin@tnext.be', '[\"ROLE_ADMIN\"]', '<HASH>', 'Admin', 'CINAF', true, NOW(), NOW())"
 
-# Plans d'abonnement (si Stripe activé)
+# Plans d'abonnement : 1) insérer les 2 plans canoniques en DB
+docker compose -f compose.prod.yaml exec backend php bin/console doctrine:query:sql \
+  "INSERT INTO subscription_plan (id, name, description, price_cents, currency, interval_unit, interval_count, features, is_active, created_at, updated_at) VALUES \
+   (gen_random_uuid(), 'Mensuel', 'Accès illimité au catalogue, facturation mensuelle.', 999, 'EUR', 'month', 1, '[\"Accès illimité au catalogue\", \"Streaming HD adaptatif\", \"Annulation à tout moment\"]', true, NOW(), NOW()), \
+   (gen_random_uuid(), 'Annuel', 'Accès illimité au catalogue, facturation annuelle (économisez 17%).', 9900, 'EUR', 'year', 1, '[\"Accès illimité au catalogue\", \"Streaming HD adaptatif\", \"12 mois pour le prix de 10\", \"Annulation à tout moment\"]', true, NOW(), NOW())"
+
+# 2) synchroniser avec Stripe (si Stripe activé)
 docker compose -f compose.prod.yaml exec backend php bin/console app:stripe:sync-plans
 ```
 
-> Rappel : les fixtures (`doctrine/doctrine-fixtures-bundle`) sont en `require-dev` → absentes en prod. D'où la création manuelle de l'admin.
+> Rappel : les fixtures (`doctrine/doctrine-fixtures-bundle`) sont en `require-dev` → absentes en prod. D'où l'insertion SQL manuelle de l'admin et des plans d'abonnement.
 
 ## Étape 9 — Webhook Stripe (si activé)
 
