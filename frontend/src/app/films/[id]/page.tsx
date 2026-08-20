@@ -3,14 +3,16 @@
 // ============================================================
 // CINAF v2 — Détail Film (alimenté par catalogue Bunny)
 // Films courts/teasers (œuvre flat) — bouton "Regarder" direct
-// vers le 1er épisode disponible.
+// vers le 1er épisode disponible. Design inspiré de cinaf.tv :
+// hero cinématographique + liste d'épisodes soignée.
 // ============================================================
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { discover, type DiscoverWork } from "@/lib/api";
-import PlaceholderPoster from "@/components/PlaceholderPoster";
+import WorkDetailHero from "@/components/WorkDetailHero";
+import EpisodeList from "@/components/EpisodeList";
 
 export default function FilmDetailPage() {
   const params = useParams();
@@ -89,82 +91,28 @@ export default function FilmDetailPage() {
   const firstEpisode = allEpisodes[0];
   const firstSeason = work.seasons[0];
 
+  // Pastilles de métadonnées (données réellement disponibles côté Bunny).
+  const metaItems = ["HD"];
+  if (allEpisodes.length > 1) metaItems.push(`${allEpisodes.length} épisodes`);
+
+  // Numéro de départ par saison (les films sont généralement mono-saison,
+  // mais certaines œuvres multi-parties sont classées Film).
+  let running = 1;
+  const seasonBlocks = work.seasons.map((season) => {
+    const start = running;
+    running += season.episodes.length;
+    return { season, start };
+  });
+
   return (
-    <div className="container py-4">
-      <Link
-        href="/films"
-        className="d-inline-block mb-3"
-        style={{ color: "var(--cinaf-text-muted)", textDecoration: "none" }}
-      >
-        <i className="bi bi-arrow-left me-1" />
-        Retour aux films
-      </Link>
-
-      <div className="row g-4 mb-4">
-        <div className="col-12 col-md-4 col-lg-3">
-          <PlaceholderPoster title={work.title} ratio="portrait" />
-        </div>
-        <div className="col-12 col-md-8 col-lg-9">
-          <h1 style={{ color: "var(--cinaf-text)", fontWeight: 700 }}>
-            {work.title.replace(/_/g, " ")}
-          </h1>
-          <p style={{ color: "var(--cinaf-text-muted)" }}>
-            {allEpisodes.length === 1
-              ? "Film disponible en streaming HD adaptatif."
-              : `${allEpisodes.length} épisode${allEpisodes.length > 1 ? "s" : ""} disponible${allEpisodes.length > 1 ? "s" : ""} en streaming HD adaptatif.`}
-          </p>
-
-          {/* Zone "Publié par" — cliquable vers la chaîne studio publique
-              (style YouTube "channel preview"). Visible uniquement si
-              l'œuvre porte une référence studio (mode catalogue DB). */}
-          {work.studio && (
-            <Link
-              href={`/studios/${work.studio.slug}`}
-              className="d-inline-flex align-items-center gap-2 mb-3 px-3 py-2"
-              style={{
-                color: "var(--cinaf-text)",
-                textDecoration: "none",
-                background: "var(--cinaf-surface)",
-                border: "1px solid var(--cinaf-border)",
-                borderRadius: 8,
-              }}
-            >
-              {work.studio.logoUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={work.studio.logoUrl}
-                  alt={work.studio.name}
-                  width={32}
-                  height={32}
-                  style={{ borderRadius: 6, objectFit: "cover" }}
-                />
-              ) : (
-                <span
-                  className="d-inline-flex align-items-center justify-content-center"
-                  style={{
-                    width: 32,
-                    height: 32,
-                    borderRadius: 6,
-                    background: "var(--cinaf-gold)",
-                    color: "var(--cinaf-bg)",
-                    fontWeight: 700,
-                    fontSize: 14,
-                  }}
-                >
-                  {work.studio.name.substring(0, 2).toUpperCase()}
-                </span>
-              )}
-              <span>
-                <span style={{ color: "var(--cinaf-text-muted)", fontSize: 13 }}>
-                  Publié par
-                </span>{" "}
-                <span style={{ fontWeight: 600 }}>{work.studio.name}</span>
-              </span>
-              <i className="bi bi-chevron-right ms-1" style={{ color: "var(--cinaf-gold)" }} />
-            </Link>
-          )}
-
-          {firstEpisode && firstSeason && (
+    <div>
+      <WorkDetailHero
+        work={work}
+        backHref="/films"
+        backLabel="Retour aux films"
+        metaItems={metaItems}
+        actions={
+          firstEpisode && firstSeason ? (
             <Link
               href={`/watch/film/${slug}?ep=${encodeURIComponent(
                 firstEpisode.slug,
@@ -174,54 +122,44 @@ export default function FilmDetailPage() {
               <i className="bi bi-play-fill me-1" />
               Regarder
             </Link>
-          )}
-        </div>
-      </div>
+          ) : null
+        }
+      />
 
       {/* Liste des épisodes si l'œuvre en contient plus d'un — couvre les
-          films courts à plusieurs parties (ex. teasers BA_xxx) ET les œuvres
-          multi-épisodes type LE_PROCCES (~90 épisodes) mal classifiées en
-          Film mais correctement résolues par le backend depuis 2026-05-22.
-          Le conteneur scrollable évite de dérouler une page interminable
-          pour les longues séries. */}
-      {allEpisodes.length > 1 && firstSeason && (
-        <div>
-          <h5 className="mb-3" style={{ color: "var(--cinaf-text-muted)" }}>
-            Tous les épisodes ({allEpisodes.length})
-          </h5>
-          <ul
-            className="list-group"
-            style={{ maxHeight: 600, overflowY: "auto" }}
-          >
-            {work.seasons.flatMap((season) =>
-              season.episodes.map((ep) => (
-                <li
-                  key={`${season.slug}-${ep.slug}`}
-                  className="list-group-item d-flex align-items-center justify-content-between"
-                  style={{
-                    background: "var(--cinaf-surface)",
-                    color: "var(--cinaf-text)",
-                    border: "1px solid var(--cinaf-border)",
-                    marginBottom: 4,
-                    borderRadius: 6,
-                  }}
-                >
-                  <span>
-                    <i className="bi bi-play-circle me-2" style={{ color: "var(--cinaf-gold)" }} />
-                    {ep.name.replace(/_/g, " ")}
-                  </span>
-                  <Link
-                    href={`/watch/film/${slug}?ep=${encodeURIComponent(
-                      ep.slug,
-                    )}&s=${encodeURIComponent(season.slug)}`}
-                    className="btn btn-sm btn-cinaf-outline"
-                  >
-                    Regarder
-                  </Link>
-                </li>
-              )),
-            )}
-          </ul>
+          films courts à plusieurs parties ET les œuvres multi-épisodes mal
+          classifiées en Film mais correctement résolues par le backend. */}
+      {allEpisodes.length > 1 && (
+        <div className="container py-5">
+          <h4 className="mb-3" style={{ color: "var(--cinaf-text)", fontWeight: 700 }}>
+            <i className="bi bi-collection-play me-2" style={{ color: "var(--cinaf-gold)" }} />
+            Épisodes
+            <span
+              className="badge ms-2"
+              style={{ background: "var(--cinaf-gold)", color: "#000", fontSize: "0.7rem" }}
+            >
+              {allEpisodes.length}
+            </span>
+          </h4>
+
+          {seasonBlocks.map(({ season, start }) => (
+            <div key={season.slug} className="mb-3">
+              {work.seasons.length > 1 && (
+                <h6 className="mb-2" style={{ color: "var(--cinaf-text-muted)" }}>
+                  {season.name.replace(/_/g, " ")}
+                </h6>
+              )}
+              <EpisodeList
+                episodes={season.episodes}
+                startNumber={start}
+                hrefFor={(ep) =>
+                  `/watch/film/${slug}?ep=${encodeURIComponent(
+                    ep.slug,
+                  )}&s=${encodeURIComponent(season.slug)}`
+                }
+              />
+            </div>
+          ))}
         </div>
       )}
     </div>

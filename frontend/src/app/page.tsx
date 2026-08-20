@@ -2,9 +2,12 @@
 
 // ============================================================
 // CINAF v2 — Page d'accueil (alimentée par le catalogue Bunny)
+// Refonte inspirée de cinaf.tv : bannière image → filtres →
+// rangées horizontales (carrousels) Films / Séries → Studios.
+// La charte graphique (thème sombre + accents dorés) est conservée.
 // ============================================================
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   discover,
@@ -13,12 +16,17 @@ import {
   type StudioPublic,
 } from "@/lib/api";
 import WorkCard from "@/components/WorkCard";
-import StudiosGrid from "@/components/StudiosGrid";
+import CarouselRow from "@/components/CarouselRow";
+import StudioCard from "@/components/StudioCard";
 import PlaceholderPoster from "@/components/PlaceholderPoster";
 
-const HOME_LIMIT = 12;
-// Nombre de studios affichés sur la home (1 ligne de 4 colonnes desktop ×2).
-const HOME_STUDIOS_LIMIT = 8;
+// On charge ~15 œuvres par type pour remplir les carrousels (cf. cinaf.tv).
+const HOME_LIMIT = 15;
+// Studios présentés dans la rangée horizontale « chaîne ».
+const HOME_STUDIOS_LIMIT = 12;
+
+// Filtre de type appliqué aux rangées de contenus (studios non concernés).
+type ContentFilter = "all" | "film" | "serie";
 
 export default function Home() {
   const [films, setFilms] = useState<DiscoverWorkSummary[]>([]);
@@ -27,6 +35,7 @@ export default function Home() {
   const [filmsTotal, setFilmsTotal] = useState(0);
   const [seriesTotal, setSeriesTotal] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState<ContentFilter>("all");
 
   useEffect(() => {
     let cancelled = false;
@@ -58,7 +67,11 @@ export default function Home() {
     };
   }, []);
 
-  const heroWork = series[0] || films[0] || null;
+  // Contenu mis en avant dans la bannière : 1re série sinon 1er film.
+  const heroWork = useMemo(() => series[0] || films[0] || null, [series, films]);
+
+  const showFilms = filter === "all" || filter === "film";
+  const showSeries = filter === "all" || filter === "serie";
 
   if (loading) {
     return (
@@ -80,106 +93,85 @@ export default function Home() {
     );
   }
 
+  const hasContent = films.length > 0 || series.length > 0;
+
   return (
     <div>
-      {/* Hero CINAF */}
+      {/* Bannière image (jamais vidéo) sur le contenu à la une */}
       {heroWork && <CinafHero work={heroWork} />}
 
       <div className="container py-5">
-        {/* Films */}
-        {films.length > 0 && (
-          <section className="mb-5">
-            <div className="d-flex align-items-center justify-content-between mb-3">
-              <h4 className="section-title mb-0" style={{ color: "var(--cinaf-text)", fontWeight: 700 }}>
-                <i className="bi bi-film me-2" style={{ color: "var(--cinaf-gold)" }} />
-                Films
-                <span
-                  className="badge ms-2"
-                  style={{ background: "var(--cinaf-gold)", color: "#000", fontSize: "0.7rem" }}
-                >
-                  {filmsTotal}
-                </span>
-              </h4>
-              <Link
-                href="/films"
-                style={{ color: "var(--cinaf-gold)", fontSize: "0.85rem", fontWeight: 500 }}
+        {/* Barre de filtres par type — Tout / Films / Séries.
+            L'API discover ne fournit pas de genre : on s'en tient au type. */}
+        {hasContent && (
+          <div className="d-flex flex-wrap gap-2 mb-4" role="tablist" aria-label="Filtrer par type">
+            {(
+              [
+                { id: "all", label: "Tout" },
+                { id: "film", label: "Films" },
+                { id: "serie", label: "Séries" },
+              ] as { id: ContentFilter; label: string }[]
+            ).map((chip) => (
+              <button
+                key={chip.id}
+                type="button"
+                className={`filter-chip ${filter === chip.id ? "active" : ""}`}
+                aria-pressed={filter === chip.id}
+                onClick={() => setFilter(chip.id)}
               >
-                Voir tout <i className="bi bi-arrow-right" />
-              </Link>
-            </div>
-            <div className="row g-3">
-              {films.slice(0, 8).map((w) => (
-                <div key={w.slug} className="col-6 col-md-3 col-lg-2">
-                  <WorkCard work={w} />
-                </div>
-              ))}
-            </div>
-          </section>
+                {chip.label}
+              </button>
+            ))}
+          </div>
         )}
 
-        {/* Séries */}
-        {series.length > 0 && (
-          <section className="mb-5">
-            <div className="d-flex align-items-center justify-content-between mb-3">
-              <h4 className="section-title mb-0" style={{ color: "var(--cinaf-text)", fontWeight: 700 }}>
-                <i className="bi bi-collection-play me-2" style={{ color: "var(--cinaf-gold)" }} />
-                Séries
-                <span
-                  className="badge ms-2"
-                  style={{ background: "var(--cinaf-gold)", color: "#000", fontSize: "0.7rem" }}
-                >
-                  {seriesTotal}
-                </span>
-              </h4>
-              <Link
-                href="/series"
-                style={{ color: "var(--cinaf-gold)", fontSize: "0.85rem", fontWeight: 500 }}
-              >
-                Voir tout <i className="bi bi-arrow-right" />
-              </Link>
-            </div>
-            <div className="row g-3">
-              {series.slice(0, 8).map((w) => (
-                <div key={w.slug} className="col-6 col-md-3 col-lg-2">
-                  <WorkCard work={w} />
-                </div>
-              ))}
-            </div>
-          </section>
+        {/* Rangée Films */}
+        {showFilms && films.length > 0 && (
+          <CarouselRow title="Films" icon="bi-film" badge={filmsTotal} viewAllHref="/films">
+            {films.map((w) => (
+              <div key={w.slug} className="carousel-item-wrapper">
+                <WorkCard work={w} />
+              </div>
+            ))}
+          </CarouselRow>
         )}
 
-        {/* Studios — vue "façon chaîne YouTube".
-            Si zéro studio public, la section n'est pas affichée. */}
+        {/* Rangée Séries */}
+        {showSeries && series.length > 0 && (
+          <CarouselRow
+            title="Séries"
+            icon="bi-collection-play"
+            badge={seriesTotal}
+            viewAllHref="/series"
+          >
+            {series.map((w) => (
+              <div key={w.slug} className="carousel-item-wrapper">
+                <WorkCard work={w} />
+              </div>
+            ))}
+          </CarouselRow>
+        )}
+
+        {/* Rangée Studios — vue « chaîne ». Indépendante du filtre de type.
+            Chaque tuile conserve le nb de vidéos publiées et d'abonnés. */}
         {studiosList.length > 0 && (
-          <section className="mb-5">
-            <div className="d-flex align-items-center justify-content-between mb-3">
-              <h4
-                className="section-title mb-0"
-                style={{ color: "var(--cinaf-text)", fontWeight: 700 }}
-              >
-                <i
-                  className="bi bi-collection-fill me-2"
-                  style={{ color: "var(--cinaf-gold)" }}
-                />
-                Studios
-              </h4>
-              <Link
-                href="/studios"
-                style={{
-                  color: "var(--cinaf-gold)",
-                  fontSize: "0.85rem",
-                  fontWeight: 500,
-                }}
-              >
-                Voir tous les studios <i className="bi bi-arrow-right" />
-              </Link>
-            </div>
-            <StudiosGrid studios={studiosList} />
-          </section>
+          <CarouselRow
+            title="Studios"
+            icon="bi-collection-fill"
+            viewAllHref="/studios"
+            viewAllLabel="Voir tous les studios"
+          >
+            {studiosList.map((s) => (
+              // Les tuiles studio sont plus larges que les vignettes d'œuvres.
+              <div key={s.id} style={{ flex: "0 0 240px", scrollSnapAlign: "start" }}>
+                <StudioCard studio={s} />
+              </div>
+            ))}
+          </CarouselRow>
         )}
 
         {/* Empty state */}
-        {films.length === 0 && series.length === 0 && (
+        {!hasContent && (
           <div className="text-center py-5">
             <i
               className="bi bi-camera-reels"
@@ -198,54 +190,72 @@ export default function Home() {
   );
 }
 
+/**
+ * Bannière « à la une » plein cadre, façon cinaf.tv, mais alimentée par
+ * une IMAGE (placeholder doré) et non une vidéo. Le contenu texte est
+ * ancré en bas à gauche ; l'affiche portrait apparaît à droite (desktop).
+ */
 function CinafHero({ work }: { work: DiscoverWorkSummary }) {
   const href = work.kind === "serie" ? `/series/${work.slug}` : `/films/${work.slug}`;
   return (
     <section
+      className="hero-banner d-flex flex-column"
       style={{
-        background:
-          "linear-gradient(180deg, rgba(10,10,10,0.4) 0%, rgba(10,10,10,1) 100%), linear-gradient(135deg, #1a1a1a 0%, #2a2010 60%, #3d2f15 100%)",
-        padding: "4rem 0 3rem",
-        borderBottom: "1px solid var(--cinaf-border)",
+        // Fond dégradé de marque (pas d'image de couverture côté Bunny live).
+        backgroundImage:
+          "linear-gradient(135deg, #1a1a1a 0%, #2a2010 55%, #3d2f15 100%)",
       }}
     >
-      <div className="container">
-        <div className="row g-4 align-items-center">
-          <div className="col-12 col-md-3 col-lg-2">
-            <PlaceholderPoster title={work.title} ratio="portrait" />
-          </div>
-          <div className="col-12 col-md-9 col-lg-10">
-            <span
-              className="badge mb-2"
-              style={{
-                background: "rgba(0,0,0,0.6)",
-                color: work.kind === "serie" ? "#8ad" : "var(--cinaf-gold)",
-                fontWeight: 700,
-                textTransform: "uppercase",
-                letterSpacing: "0.1em",
-              }}
-            >
-              {work.kind === "serie" ? "Série" : "Film"} · à la une
-            </span>
-            <h1 style={{ color: "#fff", fontWeight: 800, fontSize: "clamp(1.8rem, 4vw, 3rem)" }}>
-              {work.title.replace(/_/g, " ")}
-            </h1>
-            <p style={{ color: "var(--cinaf-text-muted)", maxWidth: 640 }}>
-              Le cinéma africain à portée de clic. Films, séries, et productions originales en
-              streaming HD adaptatif.
-            </p>
-            <div className="d-flex gap-2 mt-3">
-              <Link href={href} className="btn btn-cinaf px-4">
-                <i className="bi bi-info-circle me-1" />
-                Voir la fiche
-              </Link>
-              <Link href="/catalogue" className="btn btn-cinaf-outline px-4">
-                Parcourir le catalogue
-              </Link>
+      {/* Contenu en flux normal (pas d'overlay absolu) : la section grandit
+          avec son contenu et ne déborde pas sur les sections suivantes. */}
+      <div className="container d-flex flex-column flex-grow-1">
+          <div className="row g-4 align-items-end mt-auto py-5 w-100">
+            <div className="col-12 col-md-8 col-lg-9">
+              <span
+                className="badge mb-2"
+                style={{
+                  background: "rgba(0,0,0,0.6)",
+                  color: work.kind === "serie" ? "#8ad" : "var(--cinaf-gold)",
+                  fontWeight: 700,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.1em",
+                }}
+              >
+                {work.kind === "serie" ? "Série" : "Film"} · à la une
+              </span>
+              <h1
+                style={{
+                  color: "#fff",
+                  fontWeight: 800,
+                  fontSize: "clamp(1.8rem, 4vw, 3rem)",
+                  lineHeight: 1.15,
+                  textShadow: "0 2px 20px rgba(0,0,0,0.7)",
+                }}
+              >
+                {work.title.replace(/_/g, " ")}
+              </h1>
+              <p style={{ color: "var(--cinaf-text-muted)", maxWidth: 640 }}>
+                Le cinéma africain à portée de clic. Films, séries et productions
+                originales en streaming HD adaptatif.
+              </p>
+              <div className="d-flex gap-2 mt-3">
+                <Link href={href} className="btn btn-cinaf px-4">
+                  <i className="bi bi-info-circle me-1" />
+                  Voir la fiche
+                </Link>
+                <Link href="/catalogue" className="btn btn-cinaf-outline px-4">
+                  Parcourir le catalogue
+                </Link>
+              </div>
+            </div>
+            {/* Affiche portrait (l'« image » du hero), masquée sur mobile */}
+            <div className="col-md-4 col-lg-3 d-none d-md-block">
+              <div style={{ maxWidth: 220, marginLeft: "auto" }}>
+                <PlaceholderPoster title={work.title} ratio="portrait" />
+              </div>
             </div>
           </div>
         </div>
-      </div>
     </section>
   );
 }

@@ -1,0 +1,37 @@
+# ============================================================================
+# .gitignore racine — CINAF v2 (monorepo backend/ + frontend/)
+# Ignore la documentation interne et tout artefact d'outils d'assistance IA.
+# Les .gitignore de backend/ et frontend/ restent responsables de leur périmètre.
+# ============================================================================
+
+# --- Documentation interne du projet ---
+# Dossier de doc + mémoire projet (cahier des charges, planning, rapport TFE,
+# notes de mémoire des agents). Non versionné à la demande de Fabrice.
+# NB : DEPLOY.md et README.md à la racine restent versionnés (docs de repo).
+/DOC/
+
+# --- Claude / Claude Code ---
+.claude/
+CLAUDE.md
+CLAUDE.local.md
+
+# --- Autres assistants IA (patterns génériques, couvrent tout le monorepo) ---
+# Cursor
+.cursor/
+.cursorrules
+.cursorignore
+# GitHub Copilot
+.github/copilot-instructions.md
+# Aider
+.aider*
+
+
+# Continue / Codeium / Cline
+.continue/
+.codeium/
+.clinerules
+# Gemini CLI / OpenAI Codex CLI
+GEMINI.md
+.gemini/
+AGENTS.md
+.codex/
