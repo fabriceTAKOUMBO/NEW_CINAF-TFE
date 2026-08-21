@@ -35,6 +35,33 @@ class BunnyCatalogueService
     // Si l'œuvre contient des sous-dossiers qui matchent ce pattern, c'est une série.
     private const SEASON_PATTERN = '/^(cas|saison|s)[ _-]?\d+$/i';
 
+    /** Dossier racine regroupant les films de la zone. */
+    private const FILMS_DIR = 'FILMS';
+
+    /**
+     * Dossiers racine qui ne sont pas des œuvres : conteneur des films (traité
+     * séparément), espace du module Studio, extraits, doublons et gabarits
+     * techniques. La zone Bunny n'est jamais modifiée : on filtre côté app.
+     */
+    private const NON_WORK_DIRS = [
+        self::FILMS_DIR,
+        'studios',
+        'teasers',
+        's3',
+        'mail-template',
+        'mail_template',
+        'notification',
+    ];
+
+    /** Bande-annonce : `BA_x`, `x_BA`, `BANDE_ANNONCE_x`, `x_TEASER`. */
+    private const TRAILER_PATTERN = '/(^|[\s_-])(ba|bande[\s_-]?ann?once|teaser)([\s_-]|$)/i';
+
+    /** Partie générique d'un film : `PART1`, `PARTIE_2`, `P3`. */
+    private const PART_PATTERN = '/^(part|partie|p)[\s_-]?\d+$/i';
+
+    /** Profondeur maximale explorée sous `FILMS/`. */
+    private const MAX_FILM_DEPTH = 3;
+
     private readonly BunnyStorageService $storage;
 
     public function __construct(
@@ -158,133 +185,399 @@ class BunnyCatalogueService
     }
 
     /**
-     * Liste TOUTES les œuvres du catalogue Bunny avec leur structure complète
-     * (saisons, épisodes, paths) — utilisée par la commande d'import DB.
+     * Liste TOUTES les œuvres du catalogue Bunny avec leur structure complète —
+     * utilisée par la commande d'import DB. Pas de cache : on veut une vue
+     * cohérente au moment de l'import.
      *
-     * Contrairement à `listWorks()` qui pagine et filtre pour l'affichage public,
-     * cette méthode parcourt l'intégralité du catalogue. Pas de cache pour garantir
-     * une vue cohérente lors de l'import.
+     * Classification, déduite de l'arborescence réelle de la zone (jamais
+     * modifiée par l'application — tout est adapté ici) :
+     *  - `FILMS/` contient les films : chacun de ses sous-dossiers est un film,
+     *    sauf les vraies catégories (enfants = titres distincts, ex.
+     *    `FILMS_EN_ANGLAIS`) et les bandes-annonces orphelines (`Raube_BA`).
+     *  - Tout autre dossier racine est une série, hors {@see self::NON_WORK_DIRS}.
+     *  - Sous une série, `CAS_x` / `SAISON_x` / `S_x` est une saison ; les autres
+     *    sous-dossiers sont des épisodes « à plat » (ex. `MAD_SAL_E01`).
+     *  - Les dossiers de bande-annonce ne sont jamais comptés comme épisode ni
+     *    comme partie ; ils alimentent `trailerPath`.
+     *  - Un ré-encodage doublon `X_F` est ignoré quand `X` existe.
      *
      * @return list<array{
      *   slug:string,
      *   title:string,
-     *   kind:string,
+     *   kind:'film'|'serie',
      *   path:string,
-     *   seasons: list<array{
-     *     name:string,
-     *     path:string,
-     *     episodes: list<array{name:string, path:string}>
-     *   }>
+     *   trailerPath:?string,
+     *   parts: list<array{name:string, path:string}>,
+     *   seasons: list<array{name:string, path:string, episodes: list<array{name:string, path:string}>}>
      * }>
      */
     public function listAllWorks(): array
     {
-        $listing = $this->storage->listContents('', false);
-        $works = [];
-        $usedSlugs = [];
+        $works = array_merge($this->collectFilms(), $this->collectSeries());
+        usort($works, fn($a, $b) => strcasecmp($a['title'], $b['title']));
 
-        foreach ($listing['directories'] as $dir) {
-            $slug = $this->slugify($dir['name']);
-            $unique = $slug;
-            $i = 2;
+        // Slugs uniques, affectés après tri pour rester déterministes.
+        $usedSlugs = [];
+        foreach ($works as $i => $work) {
+            $base = $this->slugify($work['title']);
+            $unique = $base;
+            $n = 2;
             while (isset($usedSlugs[$unique])) {
-                $unique = "$slug-$i";
-                $i++;
+                $unique = "$base-$n";
+                $n++;
             }
             $usedSlugs[$unique] = true;
-
-            $structure = $this->buildWorkStructure($dir['path']);
-
-            $works[] = [
-                'slug' => $unique,
-                'title' => $dir['name'],
-                'path' => $dir['path'],
-                'kind' => $structure['kind'],
-                'seasons' => $structure['seasons'],
-            ];
+            $works[$i]['slug'] = $unique;
         }
 
-        usort($works, fn($a, $b) => strcasecmp($a['title'], $b['title']));
         return $works;
     }
 
     /**
-     * Construit la structure {kind, seasons[]} d'une œuvre en parcourant
-     * son arborescence de niveau 1 et 2.
+     * Résout les films contenus dans `FILMS/`.
      *
-     * @return array{kind:string, seasons: list<array{name:string, path:string, episodes: list<array{name:string, path:string}>}>}
+     * @return list<array<string,mixed>>
      */
-    private function buildWorkStructure(string $workPath): array
+    private function collectFilms(): array
+    {
+        try {
+            $listing = $this->storage->listContents(self::FILMS_DIR, false);
+        } catch (\Throwable) {
+            return [];
+        }
+
+        $films = [];
+        foreach ($listing['directories'] as $dir) {
+            $node = $this->resolveFilmNode($dir['path'], $dir['name'], 1);
+            foreach ($this->nodeToFilms($node) as $film) {
+                $films[] = $film;
+            }
+        }
+        return $films;
+    }
+
+    /**
+     * Classe un dossier de la branche `FILMS/` : vidéo, film, catégorie ou vide.
+     *
+     * @return array{type:'video'|'film'|'category'|'empty', name?:string, path?:string, videos?:list<array{name:string,path:string}>, children?:list<array<string,mixed>>}
+     */
+    private function resolveFilmNode(string $path, string $name, int $depth): array
+    {
+        try {
+            $listing = $this->storage->listContents($path, false);
+        } catch (\Throwable) {
+            return ['type' => 'empty'];
+        }
+
+        // Le dossier porte lui-même la vidéo (master.m3u8 / original.mp4 / rendus).
+        if ($this->listingIsEpisode($listing)) {
+            return ['type' => 'video', 'name' => $name, 'path' => $path];
+        }
+
+        if ($depth >= self::MAX_FILM_DEPTH || empty($listing['directories'])) {
+            return ['type' => 'empty'];
+        }
+
+        $children = [];
+        foreach ($listing['directories'] as $dir) {
+            $children[] = $this->resolveFilmNode($dir['path'], $dir['name'], $depth + 1);
+        }
+
+        $nested = array_filter(
+            $children,
+            static fn(array $c) => $c['type'] === 'film' || $c['type'] === 'category',
+        );
+
+        // Aucun enfant n'est lui-même un film : ce dossier EST le film, ses
+        // sous-dossiers vidéo sont ses parties / sa bande-annonce.
+        if ($nested === []) {
+            return [
+                'type' => 'film',
+                'name' => $name,
+                'path' => $path,
+                'videos' => array_values(array_map(
+                    static fn(array $c) => ['name' => $c['name'], 'path' => $c['path']],
+                    array_filter($children, static fn(array $c) => $c['type'] === 'video'),
+                )),
+            ];
+        }
+
+        // Des enfants sont eux-mêmes des films : soit ce sont les parties d'un
+        // même film (nom générique `PARTn` ou dérivé du parent), soit une
+        // catégorie regroupant des titres distincts.
+        foreach ($listing['directories'] as $dir) {
+            if ($this->isTrailerName($dir['name'])) {
+                continue; // une bande-annonce ne tranche pas partie vs catégorie
+            }
+            if ($this->looksLikePart($dir['name'], $name)) {
+                return [
+                    'type' => 'film',
+                    'name' => $name,
+                    'path' => $path,
+                    'videos' => $this->flattenVideos($children),
+                ];
+            }
+        }
+
+        return ['type' => 'category', 'name' => $name, 'path' => $path, 'children' => $children];
+    }
+
+    /**
+     * Transforme un nœud résolu en 0, 1 ou N œuvres de type film.
+     *
+     * @param  array<string,mixed>      $node
+     * @return list<array<string,mixed>>
+     */
+    private function nodeToFilms(array $node): array
+    {
+        if ($node['type'] === 'video') {
+            // Vidéo isolée directement sous `FILMS/` : bande-annonce orpheline
+            // → ignorée ; sinon film à fichier unique.
+            if ($this->isTrailerName($node['name'])) {
+                return [];
+            }
+            return [$this->makeFilm(
+                $node['name'],
+                $node['path'],
+                [['name' => $node['name'], 'path' => $node['path']]],
+            )];
+        }
+
+        if ($node['type'] === 'film') {
+            return [$this->makeFilm($node['name'], $node['path'], $node['videos'])];
+        }
+
+        if ($node['type'] === 'category') {
+            $films = [];
+            foreach ($node['children'] as $child) {
+                foreach ($this->nodeToFilms($child) as $film) {
+                    $films[] = $film;
+                }
+            }
+            return $films;
+        }
+
+        return [];
+    }
+
+    /**
+     * @param  list<array{name:string, path:string}> $videos
+     * @return array<string,mixed>
+     */
+    private function makeFilm(string $title, string $path, array $videos): array
+    {
+        $split = $this->splitVideos($videos);
+
+        return [
+            'slug' => '', // affecté par listAllWorks() après tri
+            'title' => $title,
+            'kind' => 'film',
+            'path' => $path,
+            'trailerPath' => $split['trailer']['path'] ?? null,
+            'parts' => $split['parts'],
+            'seasons' => [],
+        ];
+    }
+
+    /**
+     * Aplatit récursivement toutes les vidéos trouvées sous une liste de nœuds.
+     *
+     * @param  list<array<string,mixed>>             $nodes
+     * @return list<array{name:string, path:string}>
+     */
+    private function flattenVideos(array $nodes): array
+    {
+        $videos = [];
+        foreach ($nodes as $node) {
+            if ($node['type'] === 'video') {
+                $videos[] = ['name' => $node['name'], 'path' => $node['path']];
+            } elseif ($node['type'] === 'film') {
+                foreach ($node['videos'] as $video) {
+                    $videos[] = $video;
+                }
+            } elseif ($node['type'] === 'category') {
+                foreach ($this->flattenVideos($node['children']) as $video) {
+                    $videos[] = $video;
+                }
+            }
+        }
+        return $videos;
+    }
+
+    /**
+     * Sépare bande-annonce et parties jouables, en écartant les ré-encodages
+     * doublons `X_F` lorsque `X` existe (fichiers strictement identiques
+     * constatés sur la zone, ex. `Cleopatra` / `Cleopatra_F`).
+     *
+     * @param  list<array{name:string, path:string}> $videos
+     * @return array{parts: list<array{name:string, path:string}>, trailer: ?array{name:string, path:string}}
+     */
+    private function splitVideos(array $videos): array
+    {
+        $known = [];
+        foreach ($videos as $video) {
+            $known[$this->normalizeName($video['name'])] = true;
+        }
+
+        $parts = [];
+        $trailer = null;
+        foreach ($videos as $video) {
+            $normalized = $this->normalizeName($video['name']);
+            if (str_ends_with($normalized, 'f') && isset($known[substr($normalized, 0, -1)])) {
+                continue;
+            }
+            if ($this->isTrailerName($video['name'])) {
+                $trailer ??= $video;
+                continue;
+            }
+            $parts[] = $video;
+        }
+
+        usort($parts, fn($a, $b) => strnatcasecmp($a['name'], $b['name']));
+        return ['parts' => $parts, 'trailer' => $trailer];
+    }
+
+    /**
+     * Résout les séries : tout dossier racine hors {@see self::NON_WORK_DIRS}.
+     * Une œuvre sans aucun épisode exploitable est ignorée.
+     *
+     * @return list<array<string,mixed>>
+     */
+    private function collectSeries(): array
+    {
+        try {
+            $listing = $this->storage->listContents('', false);
+        } catch (\Throwable) {
+            return [];
+        }
+
+        $series = [];
+        foreach ($listing['directories'] as $dir) {
+            if (in_array($dir['name'], self::NON_WORK_DIRS, true)) {
+                continue;
+            }
+
+            $structure = $this->buildSeasons($dir['path']);
+            if ($structure['seasons'] === []) {
+                continue;
+            }
+
+            $series[] = [
+                'slug' => '', // affecté par listAllWorks() après tri
+                'title' => $dir['name'],
+                'kind' => 'serie',
+                'path' => $dir['path'],
+                'trailerPath' => $structure['trailerPath'],
+                'parts' => [],
+                'seasons' => $structure['seasons'],
+            ];
+        }
+        return $series;
+    }
+
+    /**
+     * Construit les saisons d'une série. Un sous-dossier `CAS_x` / `SAISON_x` /
+     * `S_x` est une saison dont les enfants sont les épisodes ; tout autre
+     * sous-dossier est un épisode « à plat » regroupé dans une saison unique.
+     *
+     * La détection est faite sur le NOM, sans appel réseau supplémentaire par
+     * épisode : les séries plates comptent jusqu'à ~90 épisodes.
+     *
+     * @return array{seasons: list<array{name:string, path:string, episodes: list<array{name:string, path:string}>}>, trailerPath: ?string}
+     */
+    private function buildSeasons(string $workPath): array
     {
         try {
             $level1 = $this->storage->listContents($workPath, false);
         } catch (\Throwable) {
-            return ['kind' => 'film', 'seasons' => []];
+            return ['seasons' => [], 'trailerPath' => null];
         }
 
         $seasons = [];
-        $rootEpisodes = [];
-        $isSerie = false;
+        $flatEpisodes = [];
+        $trailerPath = null;
 
         foreach ($level1['directories'] as $dir1) {
+            if ($this->isTrailerName($dir1['name'])) {
+                $trailerPath ??= $dir1['path'];
+                continue;
+            }
+
+            if (preg_match(self::SEASON_PATTERN, $dir1['name']) !== 1) {
+                $flatEpisodes[] = ['name' => $dir1['name'], 'path' => $dir1['path']];
+                continue;
+            }
+
             try {
                 $level2 = $this->storage->listContents($dir1['path'], false);
             } catch (\Throwable) {
                 continue;
             }
 
-            if ($this->listingIsEpisode($level2)) {
-                $rootEpisodes[] = ['name' => $dir1['name'], 'path' => $dir1['path']];
-                continue;
-            }
-
-            // dir1 = saison ; ses sous-dossiers = épisodes.
-            if (preg_match(self::SEASON_PATTERN, $dir1['name']) === 1) {
-                $isSerie = true;
-            }
-
             $episodes = [];
             foreach ($level2['directories'] as $dir2) {
+                if ($this->isTrailerName($dir2['name'])) {
+                    $trailerPath ??= $dir2['path'];
+                    continue;
+                }
                 $episodes[] = ['name' => $dir2['name'], 'path' => $dir2['path']];
             }
             usort($episodes, fn($a, $b) => strnatcasecmp($a['name'], $b['name']));
 
-            $seasons[] = [
-                'name' => $dir1['name'],
-                'path' => $dir1['path'],
-                'episodes' => $episodes,
-            ];
+            if ($episodes !== []) {
+                $seasons[] = [
+                    'name' => $dir1['name'],
+                    'path' => $dir1['path'],
+                    'episodes' => $episodes,
+                ];
+            }
         }
 
         usort($seasons, fn($a, $b) => strnatcasecmp($a['name'], $b['name']));
 
-        if (!empty($rootEpisodes)) {
-            usort($rootEpisodes, fn($a, $b) => strnatcasecmp($a['name'], $b['name']));
-            // Si on a UNIQUEMENT des épisodes flat → film (1 seul "épisode") ou
-            // série flat (plusieurs épisodes sans saisons). Convention : film.
-            if (empty($seasons) && !$isSerie) {
-                return [
-                    'kind' => 'film',
-                    'seasons' => [[
-                        'name' => 'Œuvre',
-                        'path' => $workPath,
-                        'episodes' => $rootEpisodes,
-                    ]],
-                ];
-            }
-            // Cas mixte : série avec teaser à la racine — on prepend.
+        if ($flatEpisodes !== []) {
+            usort($flatEpisodes, fn($a, $b) => strnatcasecmp($a['name'], $b['name']));
             array_unshift($seasons, [
-                'name' => 'Œuvre',
+                'name' => $seasons === [] ? 'Saison 1' : 'Épisodes hors saison',
                 'path' => $workPath,
-                'episodes' => $rootEpisodes,
+                'episodes' => $flatEpisodes,
             ]);
-            $isSerie = true;
         }
 
-        return [
-            'kind' => $isSerie ? 'serie' : 'film',
-            'seasons' => $seasons,
-        ];
+        return ['seasons' => $seasons, 'trailerPath' => $trailerPath];
+    }
+
+    private function isTrailerName(string $name): bool
+    {
+        return preg_match(self::TRAILER_PATTERN, $name) === 1;
+    }
+
+    /**
+     * Un sous-dossier est une partie du film parent s'il porte un nom générique
+     * (`PART1`, `PARTIE_2`…) ou s'il dérive du nom du parent (`ALINE_1` sous
+     * `ALINE`). Sinon le parent est une catégorie regroupant des titres
+     * distincts (`FILMS_EN_ANGLAIS` → `BROKEN`, `EDIMA`…).
+     */
+    private function looksLikePart(string $child, string $parent): bool
+    {
+        if (preg_match(self::PART_PATTERN, $child) === 1) {
+            return true;
+        }
+
+        $c = $this->normalizeName($child);
+        $p = $this->normalizeName($parent);
+        if ($c === '' || $p === '') {
+            return false;
+        }
+
+        $len = min(8, strlen($c), strlen($p));
+        return substr($c, 0, $len) === substr($p, 0, $len);
+    }
+
+    /** Réduit un nom de dossier à ses caractères alphanumériques minuscules. */
+    private function normalizeName(string $name): string
+    {
+        return strtolower(preg_replace('/[^a-z0-9]/i', '', $name) ?? '');
     }
 
     /**

@@ -234,56 +234,28 @@ class CatalogueDiscoverController extends AbstractController
 
     private function mapFilmToDiscover(Film $film): array
     {
-        // Tentative de résolution dynamique de l'arborescence Bunny via le
-        // catalogue. Motivation : la commande `app:catalogue:import-bunny`
-        // peut classifier comme Film des œuvres qui sont en réalité des
-        // séries multi-épisodes (ex : `LE_PROCCES` contient 89 sous-dossiers
-        // `LE_PROCCES_EPISODE_XX/master.m3u8`). Dans ce cas, `bunnyVideoId`
-        // pointe sur la racine et l'URL `racine/master.m3u8` répond 404.
-        //
-        // `BunnyCatalogueService::getWork()` connaît la vraie structure du
-        // dossier Bunny (via `buildWorkStructure` + `listingIsEpisode`) et
-        // produit directement la structure `seasons[].episodes[]` attendue
-        // par le frontend. On le réutilise tel quel et on enrichit du studio
-        // côté entité DB.
-        //
-        // Fallback : si Bunny est indisponible ou si le slug n'existe pas
-        // côté Bunny (cas d'un film créé via le module Studio dont le slug
-        // ne correspond pas à un dossier de `cinaftv-movies`), on retombe
-        // sur l'ancien comportement (1 saison « Œuvre », 1 épisode `principal`,
-        // hlsUrl construite depuis `Film::bunnyVideoId`).
-        try {
-            $bunnyWork = $this->catalogue->getWork($film->getSlug());
-        } catch (\Throwable) {
-            $bunnyWork = null;
-        }
-
-        if ($bunnyWork !== null && !empty($bunnyWork['seasons'])) {
-            $seasons = $bunnyWork['seasons'];
-
-            // Rétro-compatibilité URL : si l'œuvre n'a qu'une seule saison
-            // « Œuvre » avec un seul épisode (vrai film flat type `A_bientot`),
-            // on force le slug épisode à `principal` pour préserver les liens
-            // existants `?ep=principal&s=principale` générés par la fiche film.
-            if (count($seasons) === 1 && count($seasons[0]['episodes']) === 1) {
-                $seasons[0]['episodes'][0]['slug'] = 'principal';
-            }
-
-            return [
-                'slug' => $film->getSlug(),
-                'title' => $film->getTitle(),
-                'kind' => 'film',
-                // Référence studio dérivée de l'entité DB — Bunny ne connaît
-                // pas l'appartenance studio, on la rajoute systématiquement.
-                'studio' => $this->mapStudioRef($film->getStudio()),
-                'seasons' => $seasons,
-            ];
-        }
-
-        // Fallback : ancien comportement (construction depuis bunnyVideoId).
-        $bunnyPath = $film->getBunnyVideoId();
+        // Tout est résolu depuis la base : l'import (`app:catalogue:import-bunny`)
+        // enregistre le chemin Bunny de chaque partie du film dans `FilmPart`.
+        // Un film ordinaire n'a qu'une partie et conserve le slug d'épisode
+        // historique `principal` (liens `?ep=principal&s=principale` de la fiche).
+        // Les films livrés en plusieurs morceaux (ex. `FILMS/GUCCI_BROTHERS`)
+        // exposent une partie par entrée, dans l'ordre.
+        $parts = $film->getParts();
         $episodes = [];
-        if ($bunnyPath !== null && $bunnyPath !== '') {
+
+        if (count($parts) > 0) {
+            $single = count($parts) === 1;
+            foreach ($parts as $part) {
+                $episodes[] = [
+                    'slug' => $single ? 'principal' : sprintf('partie-%d', $part->getNumber()),
+                    'name' => $single ? $film->getTitle() : $part->getTitle(),
+                    'hlsUrl' => $this->buildHlsUrl($part->getBunnyVideoId()),
+                    'mp4Url' => null,
+                ];
+            }
+        } elseif (($bunnyPath = $film->getBunnyVideoId()) !== null && $bunnyPath !== '') {
+            // Film sans FilmPart : contenu créé via le module Studio, ou ligne
+            // antérieure à l'introduction des parties.
             $episodes[] = [
                 'slug' => 'principal',
                 'name' => $film->getTitle(),
@@ -291,6 +263,7 @@ class CatalogueDiscoverController extends AbstractController
                 'mp4Url' => null,
             ];
         }
+
         return [
             'slug' => $film->getSlug(),
             'title' => $film->getTitle(),

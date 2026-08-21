@@ -3,6 +3,7 @@ namespace App\Command;
 
 use App\Entity\Episode;
 use App\Entity\Film;
+use App\Entity\FilmPart;
 use App\Entity\Season;
 use App\Entity\Serie;
 use App\Entity\Studio;
@@ -65,12 +66,20 @@ class ImportBunnyCatalogueCommand extends Command
             InputOption::VALUE_NONE,
             'Affiche les actions prévues sans rien écrire en base.',
         );
+        $this->addOption(
+            'purge',
+            null,
+            InputOption::VALUE_NONE,
+            'Supprime les œuvres issues d\'un import précédent avant de réimporter '
+            . '(le contenu uploadé par les studios n\'est jamais touché).',
+        );
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $io = new SymfonyStyle($input, $output);
         $dryRun = (bool) $input->getOption('dry-run');
+        $purge = (bool) $input->getOption('purge');
 
         $studios = $this->studioRepo->findActiveOrdered();
         if (count($studios) < self::REQUIRED_STUDIOS) {
@@ -88,6 +97,10 @@ class ImportBunnyCatalogueCommand extends Command
 
         $io->title($dryRun ? 'Import Bunny → DB (DRY-RUN)' : 'Import Bunny → DB');
 
+        if ($purge) {
+            $this->purgeImported($io, $dryRun);
+        }
+
         try {
             $works = $this->catalogue->listAllWorks();
         } catch (\Throwable $e) {
@@ -100,6 +113,8 @@ class ImportBunnyCatalogueCommand extends Command
 
         $created = ['film' => 0, 'serie' => 0];
         $skipped = 0;
+        $unplayable = [];
+        $multiPart = [];
         $errors = [];
         $details = [];
         $usedSlugs = $this->loadExistingSlugs();
@@ -109,8 +124,14 @@ class ImportBunnyCatalogueCommand extends Command
                 $result = $this->processWork($work, $studios, $usedSlugs, $dryRun);
                 if ($result['action'] === 'skip') {
                     $skipped++;
+                } elseif ($result['action'] === 'empty') {
+                    // Dossier ne contenant qu'une bande-annonce : rien à lire.
+                    $unplayable[] = $result['title'];
                 } else {
                     $created[$result['kind']]++;
+                    if ($result['parts'] > 1) {
+                        $multiPart[] = sprintf('%s (%d parties)', $result['title'], $result['parts']);
+                    }
                 }
                 $details[] = $result;
             } catch (\Throwable $e) {
@@ -141,7 +162,22 @@ class ImportBunnyCatalogueCommand extends Command
         $io->writeln(sprintf('  Films créés   : %d', $created['film']));
         $io->writeln(sprintf('  Séries créées : %d', $created['serie']));
         $io->writeln(sprintf('  Skipped       : %d', $skipped));
+        $io->writeln(sprintf('  Sans vidéo    : %d', count($unplayable)));
         $io->writeln(sprintf('  Erreurs       : %d', count($errors)));
+
+        if (!empty($multiPart)) {
+            $io->section(sprintf('Films en plusieurs parties (%d)', count($multiPart)));
+            foreach ($multiPart as $label) {
+                $io->writeln('  - ' . $label);
+            }
+        }
+
+        if (!empty($unplayable)) {
+            $io->section('Dossiers sans vidéo principale (bande-annonce seule)');
+            foreach ($unplayable as $title) {
+                $io->writeln('  - ' . $title);
+            }
+        }
 
         if (!empty($errors)) {
             $io->section('Erreurs détaillées');
@@ -167,18 +203,18 @@ class ImportBunnyCatalogueCommand extends Command
     /**
      * Traite une œuvre Bunny : skip si déjà importée, sinon crée Film ou Serie.
      *
-     * @param array{slug:string,title:string,kind:string,path:string,seasons:list<array<string,mixed>>} $work
-     * @param list<Studio>                                                                              $studios
-     * @param array<string,bool>                                                                        $usedSlugs Référence pour déduplication
+     * @param array{slug:string,title:string,kind:string,path:string,trailerPath:?string,parts:list<array<string,mixed>>,seasons:list<array<string,mixed>>} $work
+     * @param list<Studio>                                                                                                                                 $studios
+     * @param array<string,bool>                                                                                                                           $usedSlugs Référence pour déduplication
      *
-     * @return array{action:'create'|'skip', kind:'film'|'serie', title:string, slug:string, studio:?string}
+     * @return array{action:'create'|'skip'|'empty', kind:'film'|'serie', title:string, slug:string, studio:?string, parts:int}
      */
     private function processWork(array $work, array $studios, array &$usedSlugs, bool $dryRun): array
     {
-        $bunnyVideoId = $work['path'];
+        $bunnyFolder = $work['path'];
 
-        // Idempotence : si une entité existe déjà avec ce bunnyVideoId, skip.
-        $existingFilm = $this->filmRepo->findOneBy(['bunnyVideoId' => $bunnyVideoId]);
+        // Idempotence : le dossier Bunny racine identifie l'œuvre importée.
+        $existingFilm = $this->filmRepo->findOneBy(['bunnyFolder' => $bunnyFolder]);
         if ($existingFilm !== null) {
             return [
                 'action' => 'skip',
@@ -186,12 +222,10 @@ class ImportBunnyCatalogueCommand extends Command
                 'title' => $work['title'],
                 'slug' => $existingFilm->getSlug(),
                 'studio' => $existingFilm->getStudio()?->getSlug(),
+                'parts' => $existingFilm->getParts()->count(),
             ];
         }
-        // Pour Serie, on stocke bunnyVideoId sur la Serie aussi via trailerVideoId
-        // OU on vérifie via slug de path. Comme Serie n'a pas bunnyVideoId direct,
-        // on utilise le slug pour vérifier.
-        $existingSerie = $this->findSerieByBunnyPath($bunnyVideoId);
+        $existingSerie = $this->findSerieByBunnyPath($bunnyFolder);
         if ($existingSerie !== null) {
             return [
                 'action' => 'skip',
@@ -199,6 +233,20 @@ class ImportBunnyCatalogueCommand extends Command
                 'title' => $work['title'],
                 'slug' => $existingSerie->getSlug(),
                 'studio' => $existingSerie->getStudio()?->getSlug(),
+                'parts' => 0,
+            ];
+        }
+
+        // Un dossier film ne contenant qu'une bande-annonce n'est pas lisible :
+        // on le signale plutôt que de créer une fiche sans vidéo.
+        if ($work['kind'] === 'film' && $work['parts'] === []) {
+            return [
+                'action' => 'empty',
+                'kind' => 'film',
+                'title' => $work['title'],
+                'slug' => $work['slug'],
+                'studio' => null,
+                'parts' => 0,
             ];
         }
 
@@ -210,39 +258,78 @@ class ImportBunnyCatalogueCommand extends Command
         $studioIdx = abs(crc32($slug)) % count($studios);
         $studio = $studios[$studioIdx];
 
-        if ($dryRun) {
-            return [
-                'action' => 'create',
-                'kind' => $work['kind'],
-                'title' => $work['title'],
-                'slug' => $slug,
-                'studio' => $studio->getSlug(),
-            ];
+        $partCount = $work['kind'] === 'film' ? count($work['parts']) : 0;
+
+        if (!$dryRun) {
+            if ($work['kind'] === 'serie') {
+                $this->createSerie($work, $slug, $studio);
+            } else {
+                $this->createFilm($work, $slug, $studio);
+            }
         }
 
-        if ($work['kind'] === 'serie') {
-            $this->createSerie($work, $slug, $studio);
-            return [
-                'action' => 'create',
-                'kind' => 'serie',
-                'title' => $work['title'],
-                'slug' => $slug,
-                'studio' => $studio->getSlug(),
-            ];
-        }
-
-        $this->createFilm($work, $slug, $studio);
         return [
             'action' => 'create',
-            'kind' => 'film',
+            'kind' => $work['kind'],
             'title' => $work['title'],
             'slug' => $slug,
             'studio' => $studio->getSlug(),
+            'parts' => $partCount,
         ];
+    }
+
+    /**
+     * Supprime les œuvres issues d'un import précédent, afin de pouvoir
+     * réimporter avec la classification corrigée (l'idempotence les ignorerait
+     * sinon). Le contenu uploadé par les studios n'est jamais touché : il porte
+     * un chemin préfixé `studios/` et n'a pas de `bunnyFolder`.
+     *
+     * Les lignes créées avant l'introduction de `bunnyFolder` sont rattrapées
+     * via leur chemin Bunny hérité (films) ou le détournement historique de
+     * `trailerVideoId` (séries).
+     */
+    private function purgeImported(SymfonyStyle $io, bool $dryRun): void
+    {
+        $films = $this->filmRepo->createQueryBuilder('f')
+            ->where('f.bunnyFolder IS NOT NULL')
+            ->orWhere('(f.bunnyVideoId IS NOT NULL AND f.bunnyVideoId NOT LIKE :studio)')
+            ->setParameter('studio', 'studios/%')
+            ->getQuery()
+            ->getResult();
+
+        $series = $this->serieRepo->createQueryBuilder('s')
+            ->where('s.bunnyFolder IS NOT NULL')
+            ->orWhere('(s.trailerVideoId IS NOT NULL AND s.trailerVideoId NOT LIKE :studio)')
+            ->setParameter('studio', 'studios/%')
+            ->getQuery()
+            ->getResult();
+
+        $io->writeln(sprintf(
+            'Purge : %d film(s) et %d série(s) issus du catalogue Bunny.',
+            count($films),
+            count($series),
+        ));
+
+        if ($dryRun) {
+            $io->warning('DRY-RUN — purge non exécutée.');
+            return;
+        }
+
+        foreach ($films as $film) {
+            $this->em->remove($film);
+        }
+        foreach ($series as $serie) {
+            $this->em->remove($serie);
+        }
+        $this->em->flush();
+        $io->writeln('  → purge effectuée.');
+        $io->newLine();
     }
 
     private function createFilm(array $work, string $slug, Studio $studio): Film
     {
+        $parts = $work['parts'];
+
         $film = new Film();
         $film->setTitle($work['title']);
         $film->setSlug($slug);
@@ -251,12 +338,28 @@ class ImportBunnyCatalogueCommand extends Command
         $film->setYear(0);
         $film->setDuration(0);
         $film->setPoster(null);
-        $film->setBunnyVideoId($work['path']);
+        $film->setBunnyFolder($work['path']);
+        // Vidéo principale = 1re partie ; les éventuelles suivantes sont
+        // portées par les FilmPart ci-dessous.
+        $film->setBunnyVideoId($parts[0]['path']);
+        $film->setTrailerVideoId($work['trailerPath']);
         $film->setStudio($studio);
         $film->setStatus(Film::STATUS_PUBLISHED);
         $film->setPublishedAt(new \DateTimeImmutable());
 
         $this->em->persist($film);
+
+        $number = 1;
+        foreach ($parts as $part) {
+            $filmPart = new FilmPart();
+            $filmPart->setNumber($number);
+            $filmPart->setTitle($part['name']);
+            $filmPart->setBunnyVideoId($part['path']);
+            $film->addPart($filmPart);
+            $this->em->persist($filmPart);
+            $number++;
+        }
+
         return $film;
     }
 
@@ -271,8 +374,8 @@ class ImportBunnyCatalogueCommand extends Command
         $serie->setStudio($studio);
         $serie->setStatus(Serie::STATUS_PUBLISHED);
         $serie->setPublishedAt(new \DateTimeImmutable());
-        // Stocke le path racine Bunny dans trailerVideoId (la Serie n'a pas bunnyVideoId direct).
-        $serie->setTrailerVideoId($work['path']);
+        $serie->setBunnyFolder($work['path']);
+        $serie->setTrailerVideoId($work['trailerPath']);
 
         $this->em->persist($serie);
 
@@ -350,10 +453,10 @@ class ImportBunnyCatalogueCommand extends Command
     }
 
     /**
-     * Cherche une Serie par bunny path racine (stocké dans trailerVideoId).
+     * Cherche une Serie par son dossier Bunny racine.
      */
     private function findSerieByBunnyPath(string $path): ?Serie
     {
-        return $this->serieRepo->findOneBy(['trailerVideoId' => $path]);
+        return $this->serieRepo->findOneBy(['bunnyFolder' => $path]);
     }
 }

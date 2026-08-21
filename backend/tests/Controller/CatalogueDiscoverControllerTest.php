@@ -3,6 +3,7 @@
 namespace App\Tests\Controller;
 
 use App\Entity\Film;
+use App\Entity\FilmPart;
 use App\Entity\Serie;
 use App\Entity\Studio;
 use App\Entity\User;
@@ -112,66 +113,51 @@ class CatalogueDiscoverControllerTest extends ApiTestCase
     }
 
     // -----------------------------------------------------------------------
-    // Tests fix « films multi-épisodes mal classifiés » (2026-05-22)
-    // — vérifient que mapFilmToDiscover résout dynamiquement la structure
-    // réelle via BunnyCatalogueService::getWork() pour les œuvres dont
-    // l'import a stocké uniquement le path racine.
+    // Tests dissociation films / séries (2026-08-21)
+    // — mapFilmToDiscover construit désormais la réponse depuis la BASE :
+    // une entrée par `FilmPart`. Le contournement 2026-05-22, qui rescannait
+    // Bunny en live pour les œuvres importées avec le seul path racine, est
+    // supprimé : l'import écrit maintenant le chemin vidéo réel de chaque
+    // partie, et les vraies séries ne sont plus classées en films.
     // -----------------------------------------------------------------------
 
-    public function test_db_source_film_with_real_bunny_multi_episodes_returns_all_episodes(): void
+    public function test_db_source_film_with_parts_returns_one_episode_per_part(): void
     {
         $client = static::createClient();
         $this->cleanCatalogueTables();
         $studio = $this->ensureStudio();
-        // Film importé Phase F : `bunnyVideoId` pointe sur le path racine
-        // (`LE_PROCCES`), ce qui produit historiquement une URL HLS cassée.
-        $this->createFilmWithBunnyPath($studio, 'LE_PROCCES', Film::STATUS_PUBLISHED, 'le-procces', 'LE_PROCCES');
 
-        // Mock Bunny : œuvre flat à 3 épisodes (simulant `LE_PROCCES_EPISODE_01..03`).
-        $this->overrideBunnyCatalogue([
-            'slug' => 'le-procces',
-            'title' => 'LE_PROCCES',
-            'kind' => 'film',
-            'seasons' => [[
-                'slug' => 'principale',
-                'name' => 'Œuvre',
-                'episodes' => [
-                    [
-                        'slug' => 'le-procces-episode-01',
-                        'name' => 'LE_PROCCES_EPISODE_01',
-                        'hlsUrl' => 'https://cdn.example/LE_PROCCES/LE_PROCCES_EPISODE_01/master.m3u8',
-                        'mp4Url' => null,
-                    ],
-                    [
-                        'slug' => 'le-procces-episode-02',
-                        'name' => 'LE_PROCCES_EPISODE_02',
-                        'hlsUrl' => 'https://cdn.example/LE_PROCCES/LE_PROCCES_EPISODE_02/master.m3u8',
-                        'mp4Url' => null,
-                    ],
-                    [
-                        'slug' => 'le-procces-episode-03',
-                        'name' => 'LE_PROCCES_EPISODE_03',
-                        'hlsUrl' => 'https://cdn.example/LE_PROCCES/LE_PROCCES_EPISODE_03/master.m3u8',
-                        'mp4Url' => null,
-                    ],
-                ],
-            ]],
-        ]);
+        // Film livré en 3 morceaux sur Bunny, tel qu'importé par
+        // `app:catalogue:import-bunny` : `bunnyVideoId` = 1re partie, et une
+        // FilmPart par morceau avec son propre chemin.
+        $paths = [
+            'FILMS/GUCCI_BROTHERS/PART1/GUCCI_BROTHERS_PART1',
+            'FILMS/GUCCI_BROTHERS/PART2/GUCCI_BROTHERS_PART2',
+            'FILMS/GUCCI_BROTHERS/PART3/GUCCI_BROTHERS_PART3',
+        ];
+        $film = $this->createFilmWithBunnyPath(
+            $studio,
+            'GUCCI_BROTHERS',
+            Film::STATUS_PUBLISHED,
+            'gucci-brothers',
+            $paths[0],
+        );
+        $this->addFilmParts($film, $paths);
 
-        $response = $this->getJson($client, '/api/catalogue/discover/le-procces');
+        $response = $this->getJson($client, '/api/catalogue/discover/gucci-brothers');
         $body = $this->assertJsonResponse($response, Response::HTTP_OK);
 
         $this->assertSame('film', $body['kind']);
         $this->assertCount(1, $body['seasons']);
         $this->assertSame('principale', $body['seasons'][0]['slug']);
         $this->assertCount(3, $body['seasons'][0]['episodes']);
-        // Slugs distincts (pas écrasés à `principal` puisqu'il y a >1 épisode).
+        // Slugs distincts (pas écrasés à `principal` puisqu'il y a >1 partie).
         $slugs = array_column($body['seasons'][0]['episodes'], 'slug');
-        $this->assertSame(['le-procces-episode-01', 'le-procces-episode-02', 'le-procces-episode-03'], $slugs);
-        // Chaque hlsUrl pointe vers le master du bon épisode (pas la racine).
-        foreach ($body['seasons'][0]['episodes'] as $ep) {
+        $this->assertSame(['partie-1', 'partie-2', 'partie-3'], $slugs);
+        // Chaque hlsUrl pointe vers le master de la bonne partie, pas la racine.
+        foreach ($body['seasons'][0]['episodes'] as $i => $ep) {
             $this->assertStringEndsWith('/master.m3u8', $ep['hlsUrl']);
-            $this->assertStringContainsString('LE_PROCCES_EPISODE_', $ep['hlsUrl']);
+            $this->assertStringContainsString('PART' . ($i + 1), $ep['hlsUrl']);
         }
     }
 
@@ -305,6 +291,30 @@ class CatalogueDiscoverControllerTest extends ApiTestCase
     }
 
     /**
+     * Attache N parties vidéo au film, dans l'ordre fourni — reproduit ce que
+     * `app:catalogue:import-bunny` écrit pour un film livré en plusieurs
+     * morceaux sur Bunny.
+     *
+     * @param list<string> $bunnyPaths
+     */
+    private function addFilmParts(Film $film, array $bunnyPaths): void
+    {
+        /** @var EntityManagerInterface $em */
+        $em = static::getContainer()->get(EntityManagerInterface::class);
+        $number = 1;
+        foreach ($bunnyPaths as $path) {
+            $part = new FilmPart();
+            $part->setNumber($number);
+            $part->setTitle(basename($path));
+            $part->setBunnyVideoId($path);
+            $film->addPart($part);
+            $em->persist($part);
+            $number++;
+        }
+        $em->flush();
+    }
+
+    /**
      * Remplace dans le container test le service `BunnyCatalogueService` par
      * un mock qui retourne la structure d'œuvre fournie en argument lors de
      * `getWork()`. Tous les autres appels du mock retournent null/0 par défaut.
@@ -349,6 +359,7 @@ class CatalogueDiscoverControllerTest extends ApiTestCase
         $conn->executeStatement('DELETE FROM episode');
         $conn->executeStatement('DELETE FROM season');
         $conn->executeStatement('DELETE FROM serie');
+        $conn->executeStatement('DELETE FROM film_part');
         $conn->executeStatement('DELETE FROM film');
         $em->clear();
     }

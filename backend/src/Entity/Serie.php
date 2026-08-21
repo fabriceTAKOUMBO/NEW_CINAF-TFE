@@ -46,6 +46,16 @@ class Serie
     #[ORM\Column(length: 500, nullable: true)]
     private ?string $trailerVideoId = null;
 
+    /**
+     * Dossier racine Bunny dont l'œuvre est issue lorsqu'elle provient de
+     * l'import du catalogue (ex. `MADAME_SALVADOR`). Reste `null` pour une
+     * série créée via le module Studio. Sert de clé d'idempotence à l'import
+     * et de critère de purge — remplace le détournement de `trailerVideoId`
+     * qui servait auparavant à stocker ce chemin.
+     */
+    #[ORM\Column(length: 500, nullable: true)]
+    private ?string $bunnyFolder = null;
+
     #[ORM\Column]
     private int $nbSeasons = 0;
 
@@ -117,6 +127,8 @@ class Serie
     public function setPoster(?string $poster): static { $this->poster = $poster; return $this; }
     public function getTrailerVideoId(): ?string { return $this->trailerVideoId; }
     public function setTrailerVideoId(?string $id): static { $this->trailerVideoId = $id; return $this; }
+    public function getBunnyFolder(): ?string { return $this->bunnyFolder; }
+    public function setBunnyFolder(?string $folder): static { $this->bunnyFolder = $folder; return $this; }
     public function getNbSeasons(): int { return $this->nbSeasons; }
     public function setNbSeasons(int $nb): static { $this->nbSeasons = $nb; return $this; }
     public function getCreatedAt(): \DateTimeImmutable { return $this->createdAt; }

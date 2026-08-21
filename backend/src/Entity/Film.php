@@ -53,6 +53,20 @@ class Film
     #[ORM\Column(length: 500, nullable: true)]
     private ?string $bunnyVideoId = null;
 
+    /**
+     * Dossier racine Bunny dont l'œuvre est issue lorsqu'elle provient de
+     * l'import du catalogue (ex. `FILMS/CLEOPATRA`). Reste `null` pour un film
+     * créé via le module Studio. Sert de clé d'idempotence à l'import et de
+     * critère de purge (le contenu studio n'est jamais touché).
+     */
+    #[ORM\Column(length: 500, nullable: true)]
+    private ?string $bunnyFolder = null;
+
+    /** Parties vidéo du film (1 seule pour un film normal). */
+    #[ORM\OneToMany(mappedBy: 'film', targetEntity: FilmPart::class, cascade: ['persist', 'remove'], orphanRemoval: true)]
+    #[ORM\OrderBy(['number' => 'ASC'])]
+    private Collection $parts;
+
     #[ORM\Column]
     private int $views = 0;
 
@@ -111,6 +125,7 @@ class Film
         $this->directors = new ArrayCollection();
         $this->cast = new ArrayCollection();
         $this->tags = new ArrayCollection();
+        $this->parts = new ArrayCollection();
     }
 
     #[ORM\PreUpdate]
@@ -136,6 +151,19 @@ class Film
     public function setTrailerVideoId(?string $id): static { $this->trailerVideoId = $id; return $this; }
     public function getBunnyVideoId(): ?string { return $this->bunnyVideoId; }
     public function setBunnyVideoId(?string $id): static { $this->bunnyVideoId = $id; return $this; }
+    public function getBunnyFolder(): ?string { return $this->bunnyFolder; }
+    public function setBunnyFolder(?string $folder): static { $this->bunnyFolder = $folder; return $this; }
+
+    public function getParts(): Collection { return $this->parts; }
+    public function addPart(FilmPart $part): static
+    {
+        if (!$this->parts->contains($part)) {
+            $this->parts->add($part);
+            $part->setFilm($this);
+        }
+        return $this;
+    }
+    public function removePart(FilmPart $part): static { $this->parts->removeElement($part); return $this; }
     public function getViews(): int { return $this->views; }
     public function setViews(int $views): static { $this->views = $views; return $this; }
     public function incrementViews(): static { $this->views++; return $this; }

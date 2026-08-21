@@ -4,6 +4,7 @@ namespace App\Tests\Command;
 
 use App\Command\ImportBunnyCatalogueCommand;
 use App\Entity\Film;
+use App\Entity\FilmPart;
 use App\Entity\Serie;
 use App\Entity\Studio;
 use App\Entity\User;
@@ -224,6 +225,79 @@ class ImportBunnyCatalogueCommandTest extends KernelTestCase
         );
     }
 
+    public function test_import_creates_one_film_part_per_video(): void
+    {
+        $this->seedStudios(10);
+
+        // Film livré en 3 morceaux sur Bunny (cas `GUCCI_BROTHERS`).
+        $works = [[
+            'name' => 'MULTI_PART',
+            'kind' => 'film',
+            'parts' => ['PART1', 'PART2', 'PART3'],
+        ]];
+
+        $tester = $this->buildCommandTester($this->mockCatalogueWithWorks($works));
+        $tester->execute([]);
+
+        $this->em->clear();
+        $film = $this->em->getRepository(Film::class)->findOneBy(['slug' => 'multi-part']);
+        $this->assertNotNull($film);
+        $this->assertCount(3, $film->getParts());
+        // La vidéo principale pointe sur la 1re partie, jamais sur la racine.
+        $this->assertSame('MULTI_PART/PART1', $film->getBunnyVideoId());
+        $this->assertSame('MULTI_PART', $film->getBunnyFolder());
+
+        $paths = array_map(
+            static fn(FilmPart $p) => $p->getBunnyVideoId(),
+            $film->getParts()->toArray(),
+        );
+        $this->assertSame(
+            ['MULTI_PART/PART1', 'MULTI_PART/PART2', 'MULTI_PART/PART3'],
+            array_values($paths),
+        );
+        // Les multi-parties sont signalés dans le rapport de la commande.
+        $this->assertStringContainsString('parties', $tester->getDisplay());
+    }
+
+    public function test_purge_removes_imported_works_but_keeps_studio_content(): void
+    {
+        $studios = $this->seedStudios(10);
+
+        // Contenu uploadé par un studio : chemin `studios/…`, pas de bunnyFolder.
+        $studioFilm = new Film();
+        $studioFilm->setTitle('Film Studio');
+        $studioFilm->setSlug('film-studio');
+        $studioFilm->setSynopsis('Créé via le module Studio.');
+        $studioFilm->setYear(2025);
+        $studioFilm->setDuration(100);
+        $studioFilm->setStudio($studios[0]);
+        $studioFilm->setStatus(Film::STATUS_PUBLISHED);
+        $studioFilm->setBunnyVideoId('studios/z-test-studio-01/mon-film/video.mp4');
+        $this->em->persist($studioFilm);
+        $this->em->flush();
+
+        $works = [['name' => 'IMPORTED', 'kind' => 'film']];
+
+        // 1er import : ajoute l'œuvre du catalogue à côté du contenu studio.
+        $this->buildCommandTester($this->mockCatalogueWithWorks($works))->execute([]);
+        $this->em->clear();
+        $this->assertSame(2, $this->em->getRepository(Film::class)->count([]));
+
+        // 2e import avec --purge : l'œuvre importée est supprimée puis recréée ;
+        // le contenu studio doit survivre.
+        $tester = $this->buildCommandTester($this->mockCatalogueWithWorks($works));
+        $tester->execute(['--purge' => true]);
+
+        $this->em->clear();
+        $filmRepo = $this->em->getRepository(Film::class);
+        $this->assertSame(2, $filmRepo->count([]));
+        $this->assertNotNull(
+            $filmRepo->findOneBy(['slug' => 'film-studio']),
+            'Le contenu uploadé par un studio ne doit jamais être purgé.',
+        );
+        $this->assertNotNull($filmRepo->findOneBy(['bunnyFolder' => 'IMPORTED']));
+    }
+
     // -----------------------------------------------------------------------
     // Helpers
     // -----------------------------------------------------------------------
@@ -231,7 +305,11 @@ class ImportBunnyCatalogueCommandTest extends KernelTestCase
     /**
      * Mock minimal du BunnyCatalogueService renvoyant des œuvres pré-fabriquées.
      *
-     * @param list<array{name:string, kind:string, seasons?:list<array{name:string,episodes:list<array{name:string}>}>}> $works
+     * Un film porte au moins une `part` (son dossier vidéo) : c'est la forme
+     * produite par `listAllWorks()` depuis la dissociation films/séries.
+     * `parts` permet de simuler un film livré en plusieurs morceaux.
+     *
+     * @param list<array{name:string, kind:string, parts?:list<string>, trailerPath?:?string, seasons?:list<array{name:string,episodes:list<array{name:string}>}>}> $works
      */
     private function mockCatalogueWithWorks(array $works): BunnyCatalogueService
     {
@@ -264,11 +342,22 @@ class ImportBunnyCatalogueCommandTest extends KernelTestCase
                 }
             }
 
+            // Parties vidéo : un film en a au moins une (par défaut un dossier
+            // homonyme sous la racine de l'œuvre) ; une série n'en a aucune.
+            $parts = [];
+            if ($w['kind'] === 'film') {
+                foreach ($w['parts'] ?? [$name] as $partName) {
+                    $parts[] = ['name' => $partName, 'path' => $name . '/' . $partName];
+                }
+            }
+
             $output[] = [
                 'slug' => $slug,
                 'title' => $name,
                 'kind' => $w['kind'],
                 'path' => $name,
+                'trailerPath' => $w['trailerPath'] ?? null,
+                'parts' => $parts,
                 'seasons' => $seasons,
             ];
             $i++;
@@ -342,6 +431,7 @@ class ImportBunnyCatalogueCommandTest extends KernelTestCase
         $conn->executeStatement('DELETE FROM episode');
         $conn->executeStatement('DELETE FROM season');
         $conn->executeStatement('DELETE FROM serie');
+        $conn->executeStatement('DELETE FROM film_part');
         $conn->executeStatement('DELETE FROM film');
         $conn->executeStatement('DELETE FROM withdrawal_request');
         $conn->executeStatement('DELETE FROM studio');
