@@ -11,6 +11,16 @@ import Link from "next/link";
 import { auth } from "@/lib/api";
 import type { ApiError } from "@/lib/api";
 
+/**
+ * Page de demande de réinitialisation de mot de passe oublié.
+ * 
+ * Fonctionnalités :
+ * - Permet à un utilisateur ayant perdu son mot de passe de renseigner son adresse email.
+ * - Communique avec le point d'accès `auth.forgotPassword`.
+ * - Affiche un écran de confirmation bienveillant (protection anti-énumération de comptes).
+ * 
+ * @returns Le formulaire de demande de réinitialisation.
+ */
 export default function ForgotPasswordPage() {
   // États pour l'email, le chargement, le succès de soumission et les erreurs
   const [email, setEmail] = useState("");

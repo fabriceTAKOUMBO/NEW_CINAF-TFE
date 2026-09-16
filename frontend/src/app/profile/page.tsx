@@ -30,6 +30,9 @@ const ROLE_LABELS: Record<string, string> = {
 
 /**
  * Détermine le rôle le plus élevé à afficher selon la hiérarchie définie.
+ * 
+ * @param roles - Liste des codes de rôles techniques de l'utilisateur (ex: `['ROLE_USER', 'ROLE_ADMIN']`).
+ * @returns Le libellé humain français correspondant au plus haut privilège.
  */
 function getHighestRole(roles: string[]): string {
   const priority = ["ROLE_ADMIN", "ROLE_MODERATEUR", "ROLE_CREATEUR", "ROLE_ABONNE", "ROLE_USER"];
@@ -39,6 +42,19 @@ function getHighestRole(roles: string[]): string {
   return "Utilisateur";
 }
 
+/**
+ * Page de gestion du profil utilisateur et de son compte CINAF.
+ * 
+ * Rôles et fonctionnalités :
+ * - Page protégée : redirige automatiquement vers `/login` si l'utilisateur est déconnecté.
+ * - Récapitulatif du compte : nom, prénom, email, rôle le plus élevé et date d'inscription.
+ * - Modification des informations personnelles (prénom, nom).
+ * - Aperçu de l'abonnement en cours et gestion de la résiliation.
+ * - Historique complet des transactions de paiement avec téléchargement des factures PDF.
+ * - Zone de suppression définitive de compte respectant le droit à l'oubli (RGPD).
+ * 
+ * @returns La vue complète de l'espace profil.
+ */
 export default function ProfilePage() {
   const { user, isAuthenticated, isLoading, logout } = useAuth();
   const router = useRouter();

@@ -9,6 +9,16 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { studioSeries } from "@/lib/api";
 
+/**
+ * Page de création d'une nouvelle série télévisée.
+ * 
+ * Étape 1 :
+ * - Renseigne le titre, le synopsis et l'année de sortie.
+ * - Enregistre le brouillon via `studioSeries.create`.
+ * - Redirige vers `/studio/series/[id]/edit` pour gérer les saisons, épisodes et l'affiche.
+ * 
+ * @returns Le formulaire de création initiale de série.
+ */
 export default function NewSeriePage() {
   const router = useRouter();
   const [submitting, setSubmitting] = useState(false);

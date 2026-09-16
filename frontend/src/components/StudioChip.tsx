@@ -1,14 +1,34 @@
-// ============================================================
-// CINAF v2 — Chip « Publié par {studio} » (vue chaîne YouTube).
-// Extrait des pages détail film/série où le même bloc était dupliqué.
-// Cliquable vers la chaîne studio publique. Visible uniquement quand
-// l'œuvre porte une référence studio (mode catalogue DB).
-// ============================================================
+/**
+ * ============================================================
+ * CINAF v2 — Pastille Studio « Publié par {studio} » (StudioChip)
+ * ============================================================
+ * Composant de lien discret et élégant inséré dans les bannières d'en-tête
+ * des films et séries pour créditer le studio créateur.
+ * 
+ * Comportement :
+ * - Redirige l'utilisateur vers la chaîne publique du studio (`/studios/{slug}`).
+ * - Affiche la miniature du logo du studio ou ses initiales en typographie dorée.
+ * - Ne s'affiche que si l'œuvre est liée à un studio en base de données.
+ */
 
 import Link from "next/link";
 import type { DiscoverStudioRef } from "@/lib/api";
 
-export default function StudioChip({ studio }: { studio: DiscoverStudioRef }) {
+/**
+ * Propriétés attendues par le composant `StudioChip`.
+ */
+interface StudioChipProps {
+  /** Référence publique vers le studio créateur */
+  studio: DiscoverStudioRef;
+}
+
+/**
+ * Pastille informative cliquable vers la chaîne d'un studio.
+ * 
+ * @param props - Propriétés contenant la référence du studio
+ * @returns Le lien stylisé en forme de badge enrichi
+ */
+export default function StudioChip({ studio }: StudioChipProps) {
   return (
     <Link
       href={`/studios/${studio.slug}`}

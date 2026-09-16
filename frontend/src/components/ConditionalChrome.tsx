@@ -1,32 +1,43 @@
 "use client";
 
-// ============================================================
-// CINAF v2 — ConditionalChrome
-// Masque la navbar haute et le footer global sur l'espace studio
-// (/studio/**), qui dispose de son propre back-office.
-// ============================================================
+/**
+ * ============================================================
+ * CINAF v2 — Enveloppe conditionnelle de navigation (ConditionalChrome)
+ * ============================================================
+ * Ce composant décide d'afficher ou de masquer la barre de navigation haute (`Navbar`)
+ * et le pied de page général (`Footer`) en fonction de la route active.
+ * 
+ * Règle de distinction de périmètre :
+ * - Espace Studio privé (`/studio` et `/studio/...`) : L'interface générale est masquée
+ *   car le module Studio implémente son propre gabarit dédié (mise en page dashboard avec barre latérale fixe).
+ * - Vue Chaînes publiques (`/studios` et `/studios/...`) : Conserve impérativement la Navbar et le Footer
+ *   car il s'agit d'un espace public de consultation.
+ *   Note : On effectue une vérification stricte (`pathname === "/studio" || pathname.startsWith("/studio/")`)
+ *   pour éviter le faux-positif lexical d'un simple `startsWith("/studio")` qui masquerait à tort `/studios`.
+ */
 
 import { usePathname } from "next/navigation";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 
+/**
+ * Composant d'habillage conditionnel de page.
+ * 
+ * @param props - Contient les éléments enfants à rendre
+ * @returns La page enveloppée de la Navbar/Footer ou rendue telle quelle dans le Studio
+ */
 export default function ConditionalChrome({
   children,
 }: {
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
-  // Backoffice studio (`/studio` exact ou `/studio/...`) : on masque la chrome
-  // globale car ce périmètre a son propre layout avec sidebar fixe.
-  // ATTENTION au piège du préfixe : `/studios` (vue publique « chaîne YouTube »)
-  // commence aussi par `/studio` lexicalement — on doit donc matcher
-  // explicitement `/studio` exact ou `/studio/...` (slash suivant), pas un
-  // simple `startsWith("/studio")` qui engloberait `/studios` à tort.
+  
+  // Vérification rigoureuse du préfixe Studio dashboard vs Studios public
   const isStudioArea = pathname === "/studio" || (pathname?.startsWith("/studio/") ?? false);
 
   if (isStudioArea) {
-    // Espace studio : pas de navbar/footer globaux, le studio layout
-    // gère sa propre chrome (sidebar fixe).
+    // Espace Studio : le gabarit studio/layout.tsx prend en charge l'ergonomie
     return <>{children}</>;
   }
 

@@ -26,6 +26,19 @@ interface PageProps {
   params: { id: string };
 }
 
+/**
+ * Page d'édition complète d'une série pour le studio.
+ * 
+ * Fonctionnalités :
+ * - Édition des métadonnées générales (titre, synopsis, année).
+ * - Upload de l'affiche de la série via `UploadDropzone`.
+ * - Gestion arborescente des saisons (`SeasonModal`) et des épisodes (`EpisodeModal`).
+ * - Envoi asynchrone des vidéos d'épisodes en arrière-plan avec suivi dans le tray global.
+ * - Actions de cycle de vie : publication, suppression et demande de retrait.
+ * 
+ * @param props.params.id - Identifiant UUID de la série.
+ * @returns L'interface complète de configuration de la série.
+ */
 export default function EditSeriePage({ params }: PageProps) {
   const { id } = params;
   const router = useRouter();
@@ -606,6 +619,15 @@ export default function EditSeriePage({ params }: PageProps) {
 
 // ─── Modale "Ajouter une saison" ─────────────────────────────
 
+/**
+ * Modale de création d'une nouvelle saison pour la série.
+ * 
+ * @param props.open - Booléen déterminant l'affichage de la modale.
+ * @param props.onClose - Callback de fermeture.
+ * @param props.onCreated - Callback de succès pour rafraîchir la liste des saisons.
+ * @param props.serieId - Identifiant UUID de la série parente.
+ * @param props.existingNumbers - Numéros de saisons déjà existants pour auto-incrémenter le numéro suggéré.
+ */
 function SeasonModal({
   open,
   onClose,
@@ -760,6 +782,22 @@ function SeasonModal({
 
 // ─── Modale "Ajouter un épisode" ─────────────────────────────
 
+/**
+ * Modale de création d'un épisode au sein d'une saison de la série.
+ * 
+ * Permet de définir :
+ * - Le numéro de l'épisode et son titre.
+ * - Le synopsis et la durée prévisionnelle.
+ * - Le fichier vidéo associé (qui sera immédiatement transmis au gestionnaire
+ *   d'upload en tâche de fond `UploadProvider` dès la validation).
+ * 
+ * @param props.open - Booléen déterminant l'affichage.
+ * @param props.onClose - Callback de fermeture.
+ * @param props.onCreated - Callback après création pour recharger l'arborescence.
+ * @param props.serieId - UUID de la série.
+ * @param props.seasonId - UUID de la saison ciblée.
+ * @param props.existingNumbers - Numéros d'épisodes existants dans la saison.
+ */
 function EpisodeModal({
   open,
   onClose,

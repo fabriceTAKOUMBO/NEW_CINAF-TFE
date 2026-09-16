@@ -18,7 +18,7 @@ import {
 import WorkCard from "@/components/WorkCard";
 import CarouselRow from "@/components/CarouselRow";
 import StudioCard from "@/components/StudioCard";
-import PlaceholderPoster from "@/components/PlaceholderPoster";
+import Poster from "@/components/Poster";
 
 // On charge ~15 œuvres par type pour remplir les carrousels (cf. cinaf.tv).
 const HOME_LIMIT = 15;
@@ -28,6 +28,21 @@ const HOME_STUDIOS_LIMIT = 12;
 // Filtre de type appliqué aux rangées de contenus (studios non concernés).
 type ContentFilter = "all" | "film" | "serie";
 
+/**
+ * Page d'accueil de la plateforme CINAF.
+ * 
+ * Fonctionnalités :
+ * - Charge en parallèle via `Promise.allSettled` les films découverts (`discover.list`),
+ *   les séries (`discover.list`), et la liste des studios partenaires (`studios.list`).
+ * - Affiche une bannière héroïque cinématographique (`CinafHero`) mettant en avant la première
+ *   œuvre majeure du catalogue.
+ * - Propose des filtres rapides (« Tout », « Films », « Séries ») pour moduler les carrousels visibles.
+ * - Présente des carrousels horizontaux fluides (`CarouselRow`) pour parcourir les productions.
+ * - Offre un carrousel dédié aux chaînes de studios pour découvrir les producteurs indépendants.
+ * - Gère l'état de chargement initial et l'état vide en l'absence temporaire de contenu.
+ * 
+ * @returns La page d'accueil interactive de CINAF.
+ */
 export default function Home() {
   const [films, setFilms] = useState<DiscoverWorkSummary[]>([]);
   const [series, setSeries] = useState<DiscoverWorkSummary[]>([]);
@@ -194,6 +209,9 @@ export default function Home() {
  * Bannière « à la une » plein cadre, façon cinaf.tv, mais alimentée par
  * une IMAGE (placeholder doré) et non une vidéo. Le contenu texte est
  * ancré en bas à gauche ; l'affiche portrait apparaît à droite (desktop).
+ * 
+ * @param props.work - L'œuvre mise à l'honneur (film ou série).
+ * @returns La section hero d'en-tête de la page d'accueil.
  */
 function CinafHero({ work }: { work: DiscoverWorkSummary }) {
   const href = work.kind === "serie" ? `/series/${work.slug}` : `/films/${work.slug}`;
@@ -251,7 +269,7 @@ function CinafHero({ work }: { work: DiscoverWorkSummary }) {
             {/* Affiche portrait (l'« image » du hero), masquée sur mobile */}
             <div className="col-md-4 col-lg-3 d-none d-md-block">
               <div style={{ maxWidth: 220, marginLeft: "auto" }}>
-                <PlaceholderPoster title={work.title} ratio="portrait" />
+                <Poster title={work.title} src={work.poster} ratio="portrait" />
               </div>
             </div>
           </div>

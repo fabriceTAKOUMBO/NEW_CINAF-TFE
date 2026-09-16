@@ -18,6 +18,19 @@ interface PageProps {
   params: { id: string };
 }
 
+/**
+ * Page d'édition complète d'un film pour le studio.
+ * 
+ * Rôles et fonctionnalités :
+ * - Édition des métadonnées (titre, synopsis, année, durée).
+ * - Téléversement de l'affiche (via `UploadDropzone` avec auto-patch).
+ * - Téléversement et transcodage de la vidéo principale vers Bunny Stream.
+ * - Actions de publication (`handlePublish`), suppression de brouillon (`handleDelete`),
+ *   et demande de retrait motivée (`WithdrawalDialog`).
+ * 
+ * @param props.params.id - Identifiant UUID du film en cours d'édition.
+ * @returns Le formulaire complet de gestion du film.
+ */
 export default function EditFilmPage({ params }: PageProps) {
   const { id } = params;
   const router = useRouter();

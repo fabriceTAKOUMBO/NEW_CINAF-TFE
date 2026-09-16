@@ -19,7 +19,9 @@ import ContentGrid from "@/components/ContentGrid";
 import StudiosGrid from "@/components/StudiosGrid";
 import SearchBar from "@/components/SearchBar";
 
-// Enveloppe Suspense pour useSearchParams (requis par Next.js 14 App Router)
+/**
+ * Page de recherche enveloppée dans un Suspense pour supporter la lecture de l'URL (`?q=`).
+ */
 export default function RecherchePage() {
   return (
     <Suspense fallback={<div className="d-flex justify-content-center py-5"><div className="spinner-border text-warning" /></div>}>
@@ -28,6 +30,17 @@ export default function RecherchePage() {
   );
 }
 
+/**
+ * Contenu interactif de recherche tous azimuts.
+ * 
+ * Fonctionnalités :
+ * - Lance en parallèle via `Promise.allSettled` les requêtes de recherche de films,
+ *   séries et studios.
+ * - Assure une saisie fluide avec debounce via `SearchBar`.
+ * - Affiche des sections séparées et compteurs distincts pour les Films, Séries et Studios.
+ * 
+ * @returns La page de recherche complète.
+ */
 function RechercheContent() {
   const searchParams = useSearchParams();
   // Récupération du paramètre de recherche 'q' depuis l'URL

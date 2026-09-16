@@ -15,8 +15,10 @@ class BunnyZoneRegistry
     private array $instances = [];
 
     /**
-     * @param array<string, array{accessKey:string, cdnBaseUrl:string}> $zones
-     *        Map indexée par nom de zone (ex: "cinaftv-movies").
+     * @param array<string, array{accessKey:string, cdnBaseUrl:string, endpoint?:string}> $zones
+     *        Map indexée par nom de zone (ex: "cinaftv-movies"). `endpoint` est
+     *        optionnel : il n'est nécessaire que pour une zone hébergée hors de
+     *        la région par défaut (ex. Stockholm → `se.storage.bunnycdn.com`).
      */
     public function __construct(
         private readonly string $endpoint,
@@ -67,7 +69,9 @@ class BunnyZoneRegistry
         }
 
         return $this->instances[$name] ??= new BunnyStorageService(
-            endpoint: $this->endpoint,
+            // Endpoint propre à la zone si elle est dans une autre région,
+            // sinon l'endpoint global.
+            endpoint: $this->zones[$name]['endpoint'] ?? $this->endpoint,
             storageZone: $name,
             accessKey: $this->zones[$name]['accessKey'],
             bunnyCdnBaseUrl: $this->zones[$name]['cdnBaseUrl'] ?? '',

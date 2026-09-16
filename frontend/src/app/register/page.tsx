@@ -34,6 +34,9 @@ interface FormErrors {
 /**
  * Fonction utilitaire de validation des données du formulaire.
  * Vérifie le format de l'email, la longueur du mot de passe et la correspondance des confirmations.
+ * 
+ * @param form - Les champs saisis par l'utilisateur lors de l'inscription.
+ * @returns Un dictionnaire des erreurs de validation par champ, le cas échéant.
  */
 function validateForm(form: RegisterForm): FormErrors {
   const errors: FormErrors = {};
@@ -66,6 +69,18 @@ function validateForm(form: RegisterForm): FormErrors {
   return errors;
 }
 
+/**
+ * Page d'inscription pour les nouveaux utilisateurs de CINAF.
+ * 
+ * Fonctionnalités :
+ * - Formulaire complet : prénom, nom, email, mot de passe et confirmation.
+ * - Validation en temps réel côté client et jauge dynamique de force du mot de passe.
+ * - Gestion de l'acceptation RGPD des conditions générales d'utilisation.
+ * - Appelle la méthode `register` de `AuthProvider`.
+ * - Affiche une vue de félicitations invitant l'utilisateur à vérifier sa boîte mail.
+ * 
+ * @returns Le composant de page d'inscription.
+ */
 export default function RegisterPage() {
   // Récupération de la méthode register du contexte d'authentification
   const { register } = useAuth();

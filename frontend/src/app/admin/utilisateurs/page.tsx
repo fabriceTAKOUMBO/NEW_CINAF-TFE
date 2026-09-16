@@ -20,6 +20,9 @@ import Pagination from "@/components/Pagination";
 
 const PAGE_LIMIT = 20;
 
+/**
+ * Page de gestion des comptes utilisateurs, enveloppée dans Suspense pour lire les SearchParams.
+ */
 export default function AdminUsersPage() {
   return (
     <Suspense
@@ -34,6 +37,17 @@ export default function AdminUsersPage() {
   );
 }
 
+/**
+ * Contenu interactif d'administration des utilisateurs CINAF.
+ * 
+ * Fonctionnalités :
+ * - Recherche par nom, prénom ou adresse email.
+ * - Filtrage par rôle (Utilisateur, Abonné, Créateur, Modérateur, Administrateur).
+ * - Actions directes : suspension / réactivation de compte, suppression, accès à la fiche détaillée.
+ * - Protection empêchant un administrateur de se suspendre ou de se supprimer lui-même.
+ * 
+ * @returns La table d'administration des utilisateurs avec filtres et pagination.
+ */
 function UsersContent() {
   const router = useRouter();
   const searchParams = useSearchParams();

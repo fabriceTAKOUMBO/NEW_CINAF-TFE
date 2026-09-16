@@ -21,6 +21,19 @@ import {
 import { useAuth } from "@/lib/auth";
 import PaymentsHistoryTable from "@/components/PaymentsHistoryTable";
 
+/**
+ * Page d'administration détaillée d'un compte utilisateur (/admin/utilisateurs/[id]).
+ * 
+ * Capacités d'administration :
+ * - Modification du profil (nom, prénom, email, état de vérification de l'email).
+ * - Attribution et révocation des rôles d'accès (multi-sélection des rôles Symfony).
+ * - Suspension temporaire ou réactivation du compte.
+ * - Attribution manuelle d'un abonnement payant (plans mensuels/annuels) avec recalcul des dates.
+ * - Résiliation différée administrative ou annulation de résiliation avec confirmation.
+ * - Consultation de l'historique complet des paiements Stripe associés au compte.
+ * 
+ * @returns La vue d'édition et de supervision détaillée du compte utilisateur.
+ */
 export default function AdminUserDetailPage() {
   const params = useParams();
   const router = useRouter();

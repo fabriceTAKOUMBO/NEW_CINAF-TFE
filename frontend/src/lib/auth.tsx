@@ -1,10 +1,20 @@
 "use client";
 
-// ============================================================
-// CINAF v2 — Contexte d'authentification React
-// Ce module gère l'état global de l'utilisateur (session).
-// Persistance : access_token dans localStorage, refresh_token en cookie.
-// ============================================================
+/**
+ * ============================================================
+ * CINAF v2 — Contexte d'authentification React (AuthContext & useAuth)
+ * ============================================================
+ * Ce module gère l'état global d'authentification de l'utilisateur sur l'application Next.js.
+ * 
+ * Principes de sécurité et persistance :
+ * - `access_token` : Jeton JWT à courte durée de vie stocké dans `localStorage` pour
+ *   autoriser les requêtes HTTP via l'en-tête `Authorization: Bearer <token>`.
+ * - `refresh_token` : Jeton à longue durée de vie stocké dans un cookie (SameSite=Strict)
+ *   pour permettre le renouvellement automatique de session ou la déconnexion révocatoire.
+ * - Récupération du profil : Réalisée de manière sécurisée via l'endpoint `/api/auth/me`.
+ *   Le JWT n'est JAMAIS décodé de façon non fiable côté client afin d'éviter les désynchronisations
+ *   de privilèges ou d'états d'abonnement.
+ */
 
 import React, {
   createContext,
@@ -23,34 +33,44 @@ import {
 // ─── Types du contexte ────────────────────────────────────────
 
 /**
- * Interface définissant les propriétés et méthodes exposées par le hook useAuth.
+ * Interface définissant les propriétés et méthodes exposées par le hook `useAuth`.
  */
 interface AuthContextValue {
+  /** Objet utilisateur connecté, ou null si anonyme */
   user: User | null;
+  /** Indicateur booléen dérivé indiquant si l'utilisateur est authentifié */
   isAuthenticated: boolean;
+  /** Indicateur indiquant si la vérification de session initiale ou une opération d'authentification est en cours */
   isLoading: boolean;
+  /** Déclenche l'authentification avec identifiants et met à jour l'état */
   login: (data: LoginData) => Promise<void>;
+  /** Déconnecte l'utilisateur localement et informe le backend */
   logout: () => Promise<void>;
+  /** Enregistre un nouvel utilisateur */
   register: (data: RegisterData) => Promise<{ message: string }>;
-  /** Re-fetch /auth/me et met à jour l'état user (utile après abonnement). */
+  /** Rafraîchit les informations du profil utilisateur depuis `/auth/me` */
   refresh: () => Promise<void>;
 }
 
 // ─── Helpers localStorage / cookie ────────────────────────────
 
 /**
- * Enregistre les jetons d'authentification de manière persistante.
+ * Enregistre les jetons d'authentification de manière persistante côté client.
+ * 
+ * @param accessToken - Le jeton JWT d'accès pour les requêtes API
+ * @param refreshToken - Le jeton de rafraîchissement stocké en cookie
  */
 function saveTokens(accessToken: string, refreshToken: string): void {
   if (typeof window === "undefined") return;
   // L'access_token est stocké en localStorage pour un accès rapide par le client HTTP
   localStorage.setItem("access_token", accessToken);
-  // Le refresh_token est stocké dans un cookie (idéalement géré par le serveur en HttpOnly)
+  // Le refresh_token est stocké dans un cookie sécurisé SameSite=Strict
   document.cookie = `refresh_token=${refreshToken}; path=/; max-age=${60 * 60 * 24 * 30}; SameSite=Strict`;
 }
 
 /**
- * Supprime toute trace de la session locale.
+ * Supprime toute trace de la session locale (localStorage et cookies).
+ * Utilisé lors de la déconnexion volontaire ou de la réception d'un 401 Unauthorized.
  */
 function clearTokens(): void {
   if (typeof window === "undefined") return;
@@ -60,21 +80,25 @@ function clearTokens(): void {
 
 /**
  * Récupère le jeton d'accès actuel depuis le stockage local.
+ * 
+ * @returns Le jeton sous forme de chaîne de caractères, ou null s'il n'existe pas ou en SSR.
  */
 function getStoredAccessToken(): string | null {
   if (typeof window === "undefined") return null;
   return localStorage.getItem("access_token");
 }
 
-// ─── Contexte ─────────────────────────────────────────────────
+// ─── Déclaration du Contexte React ────────────────────────────
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-// ─── Provider ─────────────────────────────────────────────────
+// ─── Provider Principal ───────────────────────────────────────
 
 /**
- * Composant racine de l'authentification.
- * Il doit envelopper l'application (dans layout.tsx) pour diffuser l'état de session.
+ * Composant racine fournissant le contexte d'authentification à toute l'arborescence.
+ * Doit impérativement envelopper les composants dans `src/app/layout.tsx`.
+ * 
+ * @param children - Les composants enfants à rendre
  */
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Stocke l'objet User complet récupéré depuis le backend
@@ -83,7 +107,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
   /**
-   * Effet d'initialisation au montage : vérifie si une session existe déjà.
+   * Effet d'initialisation au montage :
+   * Vérifie si un jeton d'accès existe dans le navigateur.
+   * Si oui, interroge `/api/auth/me` pour charger le profil et synchroniser les rôles/abonnements.
    */
   useEffect(() => {
     const token = getStoredAccessToken();
@@ -111,7 +137,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // ── login ──────────────────────────────────────────────────
 
   /**
-   * Authentifie l'utilisateur, stocke les jetons et charge son profil.
+   * Authentifie l'utilisateur via ses identifiants (email, mot de passe).
+   * Enregistre les jetons dans le navigateur et charge le profil utilisateur complet.
+   * 
+   * @param data - Identifiants de connexion (`email`, `password`)
    */
   const login = useCallback(async (data: LoginData): Promise<void> => {
     setIsLoading(true);
@@ -125,7 +154,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      // Sinon, on récupère le profil via /auth/me
+      // Sinon, on récupère le profil complet via /auth/me
       const profile = await authApi.me();
       setUser(profile);
     } finally {
@@ -136,14 +165,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // ── logout ─────────────────────────────────────────────────
 
   /**
-   * Déconnexion complète : informe le serveur et nettoie l'état local.
+   * Déconnexion complète : informe l'API pour révoquer le refresh_token serveur,
+   * puis purge le stockage local et réinitialise l'état utilisateur à `null`.
    */
   const logout = useCallback(async (): Promise<void> => {
     try {
-      // Appel facultatif au backend pour invalider le refresh_token
+      // Appel au backend pour invalider la session et le refresh_token en base
       await authApi.logout();
     } catch {
-      // Échec silencieux si réseau indisponible
+      // Tolérance aux pannes réseau : on déconnecte localement même si le réseau échoue
     } finally {
       clearTokens();
       setUser(null);
@@ -153,7 +183,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // ── register ───────────────────────────────────────────────
 
   /**
-   * Crée un nouveau compte utilisateur via l'API.
+   * Crée un nouveau compte utilisateur via l'API d'inscription.
+   * 
+   * @param data - Données d'inscription (email, mot de passe, nom, prénom, consentement RGPD)
+   * @returns Un objet contenant le message de confirmation de l'API
    */
   const register = useCallback(
     async (data: RegisterData): Promise<{ message: string }> => {
@@ -171,10 +204,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // ── refresh ────────────────────────────────────────────────
 
   /**
-   * Re-charge le profil utilisateur depuis /auth/me.
-   * Utilisé après une opération qui modifie l'état (souscription, annulation,
-   * vérification email, etc.) pour mettre à jour les flags comme `hasActiveSubscription`.
-   * Échec silencieux si non authentifié.
+   * Re-charge le profil utilisateur depuis `/auth/me`.
+   * Utile après une souscription Stripe, une résiliation, ou une modification de profil,
+   * afin de synchroniser instantanément les droits (ex: `hasActiveSubscription`, `roles`).
    */
   const refresh = useCallback(async (): Promise<void> => {
     if (!getStoredAccessToken()) return;
@@ -182,11 +214,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const profile = await authApi.me();
       setUser(profile);
     } catch {
-      // ignore
+      // Ignorer silencieusement si la requête échoue
     }
   }, []);
 
-  // Valeurs exposées aux composants enfants
+  // Valeurs exposées aux composants descendants
   const value: AuthContextValue = {
     user,
     isAuthenticated: user !== null,
@@ -203,7 +235,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 // ─── Hook useAuth ─────────────────────────────────────────────
 
 /**
- * Hook utilitaire pour accéder facilement aux fonctions et à l'état d'authentification.
+ * Hook personnalisé permettant d'accéder au contexte d'authentification global.
+ * 
+ * @returns L'état d'authentification et les méthodes d'action (`user`, `login`, `logout`, `refresh`, etc.)
+ * @throws {Error} Si le hook est appelé hors d'un composant enveloppé par `<AuthProvider>`
  */
 export function useAuth(): AuthContextValue {
   const ctx = useContext(AuthContext);

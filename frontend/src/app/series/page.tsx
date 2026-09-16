@@ -7,6 +7,12 @@
 import { Suspense } from "react";
 import WorksListView from "@/components/WorksListView";
 
+/**
+ * Page publique listant spécifiquement les séries et feuilletons du catalogue CINAF.
+ * Délègue l'affichage et la pagination à `WorksListView` avec le filtre `kind="serie"`.
+ * 
+ * @returns La page de navigation des séries.
+ */
 export default function SeriesPage() {
   return (
     <Suspense

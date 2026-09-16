@@ -26,6 +26,20 @@ const STATUS_OPTIONS: Array<{ value: "" | ContentStatus; label: string }> = [
   { value: "WITHDRAWN", label: "Retiré" },
 ];
 
+/**
+ * Page de gestion et de listing des séries du studio connecté.
+ * 
+ * Fonctionnalités :
+ * - Liste paginée avec filtre par statut (`DRAFT`, `PUBLISHED`, `WITHDRAWN`).
+ * - Affiche le nombre de saisons configurées.
+ * - Actions de gestion :
+ *   - Édition complète (`/studio/series/[id]/edit`).
+ *   - Publication directe (`studioSeries.publish`).
+ *   - Suppression de brouillon (`studioSeries.remove`).
+ *   - Demande de retrait motivée (`WithdrawalDialog`).
+ * 
+ * @returns Le composant de listing des séries du studio.
+ */
 export default function StudioSeriesListPage() {
   const router = useRouter();
   const [page, setPage] = useState(1);

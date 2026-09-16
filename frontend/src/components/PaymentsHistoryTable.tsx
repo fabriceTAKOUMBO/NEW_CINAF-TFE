@@ -1,26 +1,42 @@
 "use client";
 
-// ============================================================
-// CINAF v2 — Tableau "Historique des paiements"
-// Composant réutilisable affichant les paiements Stripe d'un
-// utilisateur. Consommé par /mon-abonnement (côté user) et par
-// /admin/utilisateurs/[id] (côté admin).
-// ============================================================
+/**
+ * ============================================================
+ * CINAF v2 — Tableau d'historique des paiements (PaymentsHistoryTable)
+ * ============================================================
+ * Composant de présentation réutilisable listant les transactions et factures Stripe.
+ * Consommé à la fois par :
+ * - `/mon-abonnement` : consultation personnelle par l'utilisateur connecté.
+ * - `/admin/utilisateurs/[id]` : consultation administrative du dossier client.
+ * 
+ * Fonctionnalités & Formatage :
+ * - Conversion des montants Stripe de centimes en devises formatées (ex: 999 → "9,99 €").
+ * - Formatage localisé des dates ISO en français ("JJ/MM/AAAA").
+ * - Badges de statut colorés traduits (Payée, En attente, Annulée, Non recouvrable).
+ * - Lien direct vers le PDF officiel de facture Stripe hébergé.
+ * - Gestion élégante des états de chargement (`loading`), d'erreur (`error`) et de liste vide.
+ */
 
 import type { Payment } from "@/lib/api";
 
+/**
+ * Propriétés attendues par le composant `PaymentsHistoryTable`.
+ */
 interface PaymentsHistoryTableProps {
-  /** Liste des paiements à afficher (déjà triés du plus récent au plus ancien côté backend). */
+  /** Liste ordonnée des paiements reçus depuis l'API */
   payments: Payment[];
-  /** Indique si le chargement initial est en cours. */
+  /** Indique si les données sont en cours de chargement */
   loading: boolean;
-  /** Message d'erreur éventuel à afficher à la place du tableau. */
+  /** Message d'erreur éventuel en cas d'échec de récupération */
   error: string | null;
 }
 
 /**
- * Formate un montant Stripe (en centimes) vers une chaîne lisible.
- * Ex : (999, "EUR") → "9,99 €".
+ * Convertit un montant exprimé en centimes (format Stripe) vers une chaîne monétaire formatée en français.
+ * 
+ * @param amountInCents - Montant en centimes (ex: 999)
+ * @param currency - Code de devise ISO (ex: "eur")
+ * @returns Le montant formaté (ex: "9,99 €")
  */
 function formatAmount(amountInCents: number, currency: string): string {
   try {
@@ -29,13 +45,16 @@ function formatAmount(amountInCents: number, currency: string): string {
       currency: (currency || "EUR").toUpperCase(),
     });
   } catch {
-    // Fallback si la devise n'est pas reconnue par Intl.
+    // Fallback de sécurité si la devise n'est pas supportée par l'environnement Intl
     return `${(amountInCents / 100).toFixed(2)} ${currency}`;
   }
 }
 
 /**
- * Formate une date ISO 8601 en JJ/MM/AAAA. Retourne "—" si la date est nulle.
+ * Formate un horodatage ISO 8601 en date française (JJ/MM/AAAA).
+ * 
+ * @param iso - Date sous forme de chaîne ISO ou null
+ * @returns Date formatée ou tiret cadratin si indisponible
  */
 function formatDate(iso: string | null): string {
   if (!iso) return "—";
@@ -45,7 +64,10 @@ function formatDate(iso: string | null): string {
 }
 
 /**
- * Mappe un statut Stripe vers un libellé français + une classe Bootstrap.
+ * Associe à un statut Stripe son équivalent français et la classe Bootstrap appropriée.
+ * 
+ * @param status - Statut retourné par l'API Stripe ('paid', 'open', 'void', etc.)
+ * @returns Libellé en français et classe CSS du badge
  */
 function statusBadge(status: string | null): { label: string; className: string } {
   switch (status) {
@@ -63,15 +85,17 @@ function statusBadge(status: string | null): { label: string; className: string 
 }
 
 /**
- * Tableau Bootstrap responsive listant les paiements (date, plan, montant, statut, lien PDF).
- * Affiche un spinner si `loading`, un message d'erreur si `error`, un état vide si la liste est vide.
+ * Tableau de facturation et historique des paiements Stripe.
+ * 
+ * @param props - Propriétés du composant
+ * @returns Le tableau responsive des transactions
  */
 export default function PaymentsHistoryTable({
   payments,
   loading,
   error,
 }: PaymentsHistoryTableProps) {
-  // État de chargement
+  // État de chargement en cours
   if (loading) {
     return (
       <div className="text-center py-4">
@@ -86,7 +110,7 @@ export default function PaymentsHistoryTable({
     );
   }
 
-  // État d'erreur
+  // État d'erreur réseau ou serveur
   if (error) {
     return (
       <div className="alert alert-danger py-2 mb-0" role="alert">
@@ -96,7 +120,7 @@ export default function PaymentsHistoryTable({
     );
   }
 
-  // État vide
+  // État aucun paiement enregistré
   if (payments.length === 0) {
     return (
       <p
@@ -109,7 +133,7 @@ export default function PaymentsHistoryTable({
     );
   }
 
-  // Tableau standard
+  // Tableau complet des règlements
   return (
     <div className="table-responsive">
       <table

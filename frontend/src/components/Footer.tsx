@@ -1,11 +1,26 @@
-// ============================================================
-// CINAF v2 — Footer global (Server Component)
-// ============================================================
+/**
+ * ============================================================
+ * CINAF v2 — Pied de page global (Footer)
+ * ============================================================
+ * Composant de pied de page universel (Server Component) présent sur toutes les pages publiques.
+ * 
+ * Sections organisées :
+ * - Marque CINAF, slogan et liens vers les réseaux sociaux officiels (Facebook, Instagram, X, YouTube).
+ * - Navigation plateforme : Catalogue, Studio, Abonnements, et candidature créateur ("Vous êtes producteur ?").
+ * - Légal : Liens vers les CGU, Politique de confidentialité et Gestion des cookies.
+ * - Société : À propos, Contact et Espace presse.
+ * - Bas de page : Copyright avec année dynamique et mention de fabrication soignée.
+ */
 
 import Link from "next/link";
 
+/**
+ * Pied de page général de la plateforme CINAF.
+ * 
+ * @returns Le footer complet responsive
+ */
 export default function Footer() {
-  // Récupération de l'année actuelle pour le copyright
+  // Calcul automatique de l'année pour le copyright légal
   const currentYear = new Date().getFullYear();
 
   return (
@@ -19,7 +34,7 @@ export default function Footer() {
               Le cinéma africain à portée de clic
             </p>
             <div className="d-flex gap-3 mt-3">
-              {/* Liens vers les réseaux sociaux */}
+              {/* Réseaux sociaux externes avec sécurité noopener noreferrer */}
               <a
                 href="https://facebook.com"
                 target="_blank"
@@ -55,7 +70,7 @@ export default function Footer() {
             </div>
           </div>
 
-          {/* Navigation principale */}
+          {/* Navigation vers les sections de la plateforme */}
           <div className="col-6 col-md-2 offset-md-2">
             <h6
               className="mb-3"
@@ -77,7 +92,7 @@ export default function Footer() {
                 <Link href="/studio">Studio</Link>
               </li>
               <li>
-                <Link href="/abonnements">Abonnements</Link>
+                <Link href="/abonnement">Abonnements</Link>
               </li>
               <li>
                 <Link href="/devenir-producteur">Vous êtes producteur ?</Link>
@@ -112,7 +127,7 @@ export default function Footer() {
             </ul>
           </div>
 
-          {/* À propos de la société */}
+          {/* Informations sur l'entreprise */}
           <div className="col-6 col-md-2">
             <h6
               className="mb-3"
@@ -140,7 +155,7 @@ export default function Footer() {
           </div>
         </div>
 
-        {/* Barre de bas de page : Copyright et mention spéciale */}
+        {/* Ligne inférieure : Copyright et signature de marque */}
         <div
           style={{
             borderTop: "1px solid var(--cinaf-border)",

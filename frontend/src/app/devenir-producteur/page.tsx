@@ -18,6 +18,18 @@ import { useAuth } from "@/lib/auth";
 import { isAdmin } from "@/lib/auth-helpers";
 import { studio as studioApi, studioOnboarding, type ApiError } from "@/lib/api";
 
+/**
+ * Parcours d'intégration en libre-service ("Onboarding") pour devenir producteur sur CINAF.
+ * 
+ * Fonctionnalités :
+ * - Vérifie si l'utilisateur est authentifié (sinon redirection vers `/login`).
+ * - Interdit la création de studio aux comptes administrateurs.
+ * - Détecte si l'utilisateur possède déjà un studio (`studioApi.getMe`) et le redirige vers `/studio`.
+ * - Soumet le formulaire de création de studio (`studioOnboarding.create`), puis rafraîchit la session
+ *   JWT pour acquérir le rôle `ROLE_CREATEUR`.
+ * 
+ * @returns Le formulaire de candidature / création de studio.
+ */
 export default function DevenirProducteurPage() {
   const router = useRouter();
   const { user, isAuthenticated, isLoading, refresh } = useAuth();

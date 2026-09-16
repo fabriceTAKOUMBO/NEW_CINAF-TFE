@@ -10,6 +10,10 @@ parameters:
     # Zone source du catalogue public (peut diverger de default_zone à terme).
     app.bunny.catalogue_zone: '%env(BUNNY_CATALOGUE_ZONE)%'
 
+    # Zone des visuels (affiches, backdrops, logos) — distincte de la zone
+    # vidéo et hébergée dans une autre région.
+    app.bunny.images_zone: '%env(BUNNY_IMAGES_ZONE)%'
+
     # Source du catalogue public (Phase F — Agent 5).
     # Valeurs : 'bunny' (default, rollback safe) | 'db' (alimenté par les entités).
     app.catalogue.source: '%env(CATALOGUE_SOURCE)%'
@@ -36,6 +40,13 @@ parameters:
         cinaftv-movies:
             accessKey: '%env(BUNNY_ZONE_CINAFTV_MOVIES_KEY)%'
             cdnBaseUrl: 'https://cinaftv-movies.b-cdn.net'
+        # Zone des visuels (affiches, backdrops, logos, miniatures d'épisodes).
+        # Hébergée à Stockholm : elle surcharge l'endpoint global, sinon
+        # l'API Storage répond 401 (chaque région a son hôte).
+        cinaf-engine-zone:
+            accessKey: '%env(BUNNY_ZONE_CINAF_ENGINE_KEY)%'
+            cdnBaseUrl: 'https://cinaf-engine.b-cdn.net'
+            endpoint: 'https://se.storage.bunnycdn.com'
 
 services:
     # default configuration for services in *this* file
@@ -76,6 +87,12 @@ services:
         arguments:
             $catalogueZone: '%app.bunny.catalogue_zone%'
             $cache: '@cache.app'
+
+    # Import des affiches depuis la zone Bunny des visuels.
+    App\Command\ImportCataloguePostersCommand:
+        arguments:
+            $imagesZone: '%app.bunny.images_zone%'
+            $caBundle: '%app.bunny.ca_bundle%'
 
     # Contrôleur catalogue public — feature flag CATALOGUE_SOURCE injecté.
     App\Controller\CatalogueDiscoverController:

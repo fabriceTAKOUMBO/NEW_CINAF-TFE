@@ -7,6 +7,11 @@
 
 import Link from "next/link";
 
+/**
+ * Page informative affichée lorsque l'utilisateur quitte ou interrompt
+ * le formulaire de checkout Stripe. Rassure sur l'absence de prélèvement
+ * et propose des liens de redirection vers les plans ou l'accueil.
+ */
 export default function AbonnementCancelPage() {
   return (
     <div className="container py-5">

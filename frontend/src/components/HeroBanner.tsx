@@ -1,23 +1,45 @@
 "use client";
 
-// ============================================================
-// CINAF v2 — Hero Banner (mise en avant)
-// ============================================================
+/**
+ * ============================================================
+ * CINAF v2 — Bannière Hero de mise en avant (HeroBanner)
+ * ============================================================
+ * Grande bannière cinématographique plein cadre utilisée en haut de la page d'accueil
+ * pour présenter le film ou la série phare du moment.
+ * 
+ * Conception :
+ * - Image d'affiche en arrière-plan avec voile dégradé sombre (`hero-banner-overlay`).
+ * - Grand titre avec ombre portée pour un contraste optimal.
+ * - Ligne d'informations : Année de sortie, durée en minutes et pastilles de genres dorées.
+ * - Synopsis accrocheur tronqué à 160 caractères.
+ * - Boutons d'appel à l'action : "Regarder" (or) et "Voir la fiche" (contour).
+ */
 
 import Link from "next/link";
 import type { Film, Serie } from "@/lib/api";
 
+/**
+ * Propriétés attendues par le composant `HeroBanner`.
+ */
 interface HeroBannerProps {
+  /** L'œuvre mise en vedette */
   content: Film | Serie;
+  /** Le type de l'œuvre ("film" ou "serie") */
   type: "film" | "serie";
 }
 
+/**
+ * Bannière d'accroche principale pour la page d'accueil.
+ * 
+ * @param props - Propriétés du composant
+ * @returns La section hero plein cadre
+ */
 export default function HeroBanner({ content, type }: HeroBannerProps) {
-  // Construction des liens vers la fiche et vers le lecteur
+  // Liens de redirection vers la consultation détaillée ou le lecteur vidéo
   const href = type === "film" ? `/films/${content.id}` : `/series/${content.id}`;
   const watchHref = type === "film" ? `/watch/film/${content.id}` : `/series/${content.id}`;
 
-  // Tronquer le synopsis à environ 160 caractères pour l'affichage dans la bannière
+  // Tronquer le synopsis à environ 160 caractères pour ne pas surcharger la bannière
   const shortSynopsis =
     content.synopsis && content.synopsis.length > 160
       ? content.synopsis.slice(0, 160).trimEnd() + "..."
@@ -35,6 +57,7 @@ export default function HeroBanner({ content, type }: HeroBannerProps) {
       <div className="hero-banner-overlay">
         <div className="container h-100 d-flex align-items-end pb-5">
           <div style={{ maxWidth: 650 }}>
+            {/* Grand titre cinématographique */}
             <h1
               style={{
                 color: "#fff",
@@ -47,7 +70,7 @@ export default function HeroBanner({ content, type }: HeroBannerProps) {
               {content.title}
             </h1>
             
-            {/* Informations secondaires : Année, Durée, Genres */}
+            {/* Métadonnées : Année, Durée et Genres */}
             <div
               className="d-flex align-items-center gap-3 mt-2 mb-3 flex-wrap"
               style={{ color: "var(--cinaf-text-muted)", fontSize: "0.9rem" }}
@@ -73,7 +96,7 @@ export default function HeroBanner({ content, type }: HeroBannerProps) {
               ))}
             </div>
             
-            {/* Affichage du synopsis court */}
+            {/* Synopsis court */}
             {shortSynopsis && (
               <p
                 style={{
@@ -87,7 +110,7 @@ export default function HeroBanner({ content, type }: HeroBannerProps) {
               </p>
             )}
             
-            {/* Boutons d'action */}
+            {/* Boutons d'action CTA */}
             <div className="d-flex gap-3 mt-3">
               <Link href={watchHref} className="btn btn-cinaf px-4">
                 <i className="bi bi-play-fill me-1" />

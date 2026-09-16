@@ -1,26 +1,45 @@
 "use client";
 
-// ============================================================
-// CINAF v2 — Card pour une œuvre du catalogue Bunny
-// ============================================================
+/**
+ * ============================================================
+ * CINAF v2 — Carte d'œuvre pour le catalogue Bunny (WorkCard)
+ * ============================================================
+ * Représente un film ou une série dans les grilles et carrousels de découverte.
+ * 
+ * Conception :
+ * - Intègre le composant `Poster` en format portrait avec ratio d'aspect cinématographique.
+ * - Arbore une pastille supérieure droite indiquant le type : "Film" (doré) ou "Série" (bleu ciel).
+ * - Titre de l'œuvre nettoyé (remplacement des underscores issus du nom de dossier Bunny).
+ * - Fonction utilitaire exportée `routeFor(work)` calculant l'URL cible canonique.
+ */
 
 import Link from "next/link";
 import type { DiscoverWorkSummary } from "@/lib/api";
-import PlaceholderPoster from "./PlaceholderPoster";
+import Poster from "./Poster";
 
+/**
+ * Propriétés attendues par le composant `WorkCard`.
+ */
 interface WorkCardProps {
+  /** Résumé des informations de l'œuvre */
   work: DiscoverWorkSummary;
-  /** Force la destination si on ne veut pas que kind décide. */
+  /** Permet de surcharger l'URL de redirection par défaut */
   hrefOverride?: string;
 }
 
+/**
+ * Carte interactive représentant une œuvre du catalogue.
+ * 
+ * @param props - Propriétés du composant
+ * @returns La carte cliquable avec affiche et badge de format
+ */
 export default function WorkCard({ work, hrefOverride }: WorkCardProps) {
   const href = hrefOverride ?? routeFor(work);
 
   return (
     <Link href={href} className="d-block text-decoration-none" style={{ color: "inherit" }}>
       <div style={{ position: "relative" }}>
-        <PlaceholderPoster title={work.title} ratio="portrait" />
+        <Poster title={work.title} src={work.poster} ratio="portrait" />
         <span
           style={{
             position: "absolute",
@@ -50,6 +69,12 @@ export default function WorkCard({ work, hrefOverride }: WorkCardProps) {
   );
 }
 
+/**
+ * Détermine la route de consultation détaillée selon le type d'œuvre.
+ * 
+ * @param work - Le résumé de l'œuvre
+ * @returns Le chemin d'accès relatif (ex: "/films/mon-film" ou "/series/ma-serie")
+ */
 export function routeFor(work: DiscoverWorkSummary): string {
   return work.kind === "serie" ? `/series/${work.slug}` : `/films/${work.slug}`;
 }

@@ -1,20 +1,39 @@
 "use client";
 
-// ============================================================
-// CINAF v2 — Tuile studio publique (vue "chaîne YouTube")
-// ============================================================
+/**
+ * ============================================================
+ * CINAF v2 — Tuile de studio public (StudioCard)
+ * ============================================================
+ * Carte interactive représentant un studio de production cinématographique
+ * (équivalent d'une fiche de chaîne de créateur style YouTube).
+ * 
+ * Conception et éléments visuels :
+ * - Logo carré 1:1 : Affiche l'image de marque du studio (`logoUrl`), ou un placeholder
+ *   doré arborant les initiales calculées dynamiquement (`studioInitials`).
+ * - Métadonnées de contenu : Compteurs de films et de séries publiés.
+ * - Compteur d'abonnés : Affiche le nombre de personnes suivant la chaîne (follow gratuit)
+ *   formaté selon les règles typographiques françaises (séparateur d'espace insécable).
+ * - Description : Texte de présentation tronqué avec ellipse de courtoisie.
+ * - Navigation : Toute la carte est cliquable et mène vers la page chaîne `/studios/{slug}`.
+ */
 
 import Link from "next/link";
 import type { StudioPublic } from "@/lib/api";
 
+/**
+ * Propriétés attendues par le composant `StudioCard`.
+ */
 interface StudioCardProps {
+  /** Les données publiques du studio à afficher */
   studio: StudioPublic;
 }
 
 /**
- * Calcule les initiales (1 ou 2 caractères majuscules) d'un nom de studio
- * pour le placeholder du logo lorsqu'aucun `logoUrl` n'est défini.
- * Ex. "Studio Nollywood Lagos" → "SN", "ABC" → "AB".
+ * Calcule les initiales (1 ou 2 caractères majuscules) à partir du nom d'un studio
+ * afin de générer un avatar textuel harmonieux lorsque aucun logo n'est téléversé.
+ * 
+ * @param name - Le nom complet du studio (ex: "Studio Nollywood Lagos")
+ * @returns Les initiales en majuscules (ex: "SN")
  */
 function studioInitials(name: string): string {
   const words = name.trim().split(/\s+/).filter(Boolean);
@@ -24,8 +43,11 @@ function studioInitials(name: string): string {
 }
 
 /**
- * Tronque proprement une description au plus près d'un nombre de caractères
- * donné, en ajoutant un caractère ellipse (…) si une coupe a été effectuée.
+ * Tronque proprement une chaîne de texte au seuil spécifié en ajoutant une ellipse (…).
+ * 
+ * @param text - Le texte d'origine
+ * @param max - Le nombre maximal de caractères souhaité (défaut: 100)
+ * @returns La chaîne tronquée
  */
 function truncate(text: string, max = 100): string {
   if (text.length <= max) return text;
@@ -33,19 +55,18 @@ function truncate(text: string, max = 100): string {
 }
 
 /**
- * Tuile studio réutilisable :
- *   - Logo carré 1:1 en haut (placeholder doré aux initiales si null).
- *   - Nom du studio + compteur « X films · Y séries ».
- *   - Description tronquée à ~100 caractères.
- *
- * La carte entière est cliquable → `/studios/{slug}`.
+ * Composant de carte studio pour les grilles d'exploration publique.
+ * 
+ * @param props - Propriétés du composant
+ * @returns La carte cliquable stylisée
  */
 export default function StudioCard({ studio }: StudioCardProps) {
   const filmsLabel = `${studio.publishedFilmsCount} film${studio.publishedFilmsCount > 1 ? "s" : ""}`;
   const seriesLabel = `${studio.publishedSeriesCount} série${studio.publishedSeriesCount > 1 ? "s" : ""}`;
+  
   // Pluriel français : 0 et 1 prennent « abonné », 2+ prennent « abonnés ».
   // `toLocaleString('fr-FR')` ajoute l'espace insécable comme séparateur de
-  // milliers (ex. 1 234) pour rester aligné avec les conventions typo FR.
+  // milliers (ex. 1 234) pour respecter les conventions typographiques françaises.
   const subscribersLabel = `${studio.subscribersCount.toLocaleString("fr-FR")} ${
     studio.subscribersCount <= 1 ? "abonné" : "abonnés"
   }`;
@@ -57,7 +78,7 @@ export default function StudioCard({ studio }: StudioCardProps) {
       style={{ color: "inherit" }}
     >
       <div className="content-card h-100 p-3 d-flex flex-column">
-        {/* Logo carré 1:1 — placeholder doré si pas de logoUrl */}
+        {/* Logo carré 1:1 avec placeholder doré calculé sur les initiales si absent */}
         <div
           style={{
             aspectRatio: "1 / 1",
@@ -96,7 +117,7 @@ export default function StudioCard({ studio }: StudioCardProps) {
           )}
         </div>
 
-        {/* Nom + compteur + description */}
+        {/* Nom du studio, volume de production et communauté */}
         <h6
           className="mb-1 text-truncate"
           style={{ color: "var(--cinaf-text)", fontWeight: 700 }}
@@ -110,7 +131,7 @@ export default function StudioCard({ studio }: StudioCardProps) {
         >
           {filmsLabel} · {seriesLabel}
         </p>
-        {/* Compteur d'abonnés sur sa propre ligne (icône cloche+gens dorée). */}
+        {/* Compteur d'abonnés avec icône communautaire */}
         <p
           className="mb-2 small d-flex align-items-center gap-1"
           style={{ color: "var(--cinaf-gold)", fontSize: "0.8rem" }}

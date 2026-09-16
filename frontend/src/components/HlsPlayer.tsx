@@ -1,21 +1,43 @@
 "use client";
 
-// ============================================================
-// CINAF v2 — Lecteur HLS (hls.js avec fallback Safari natif et MP4)
-// ============================================================
+/**
+ * ============================================================
+ * CINAF v2 — Lecteur HLS (hls.js avec fallback Safari natif et MP4)
+ * ============================================================
+ * Ce composant gère la lecture des flux vidéos encodés en HTTP Live Streaming (HLS)
+ * avec une stratégie de résilience multi-niveaux :
+ * 
+ * Stratégie de compatibilité & fallback :
+ * 1. Détection Safari / iOS : Utilisation du décodeur HLS natif Apple (`application/vnd.apple.mpegurl`).
+ * 2. Détection Chrome / Firefox / Edge : Initialisation de la librairie JavaScript `hls.js`.
+ * 3. En cas d'erreur fatale réseau (ex: playlist HLS non encore générée par l'encodeur CDN) :
+ *    Bascule transparente et instantanée sur le fichier vidéo MP4 de secours (`fallbackMp4`).
+ * 4. Gestion des sources vides ou invalides pour éviter le gel du lecteur à 0:00.
+ */
 
 import { useEffect, useRef, useState } from "react";
 import Hls, { ErrorTypes } from "hls.js";
 
+/**
+ * Propriétés attendues par le composant `HlsPlayer`.
+ */
 interface HlsPlayerProps {
-  /** URL du master.m3u8 (HLS adaptatif). */
+  /** URL du manifeste master.m3u8 (HLS à débit adaptatif) */
   src?: string | null;
-  /** URL d'un MP4 brut, utilisée si HLS échoue ou n'est pas disponible. */
+  /** URL directe d'un fichier MP4 brut, utilisée si le flux HLS est indisponible ou en erreur */
   fallbackMp4?: string | null;
+  /** Lecture automatique au chargement */
   autoplay?: boolean;
+  /** Image d'affiche (poster) affichée avant le déclenchement de la lecture */
   poster?: string;
 }
 
+/**
+ * Lecteur vidéo HLS résilient avec bascule automatique.
+ * 
+ * @param props - Propriétés du lecteur
+ * @returns Le lecteur vidéo HTML5 avec gestionnaire d'erreurs et indicateur visuel de fallback
+ */
 export default function HlsPlayer({
   src,
   fallbackMp4,
@@ -33,32 +55,30 @@ export default function HlsPlayer({
     setError(null);
     setUsingMp4(false);
 
-    // Défense en profondeur : `src` peut être une chaîne vide renvoyée par
-    // un backend dont la résolution Bunny a échoué. On normalise via trim()
-    // pour traiter "" et "   " comme absent et éviter `<video src="">` qui
-    // affiche les contrôles natifs avec timeline figée à 0:00.
+    // Normalisation des URLs (retrait des espaces superflus) pour éviter les src vides qui bloquent les contrôles natifs
     const trimmedSrc = typeof src === "string" ? src.trim() : "";
     const trimmedMp4 = typeof fallbackMp4 === "string" ? fallbackMp4.trim() : "";
 
-    // Aucune source HLS exploitable → MP4 direct si dispo
+    // Cas 1 : Aucune source HLS fournie mais un fichier MP4 est présent → bascule immédiate en MP4
     if (!trimmedSrc && trimmedMp4) {
       video.src = trimmedMp4;
       setUsingMp4(true);
       return;
     }
 
+    // Cas 2 : Aucune source vidéo exploitable du tout
     if (!trimmedSrc) {
       setError("Aucune source vidéo prête pour cet épisode.");
       return;
     }
 
-    // Safari/iOS : lecteur HLS natif
+    // Cas 3 : Navigateurs Apple (Safari / iOS) disposant d'un support natif HLS
     if (video.canPlayType("application/vnd.apple.mpegurl")) {
       video.src = trimmedSrc;
       return;
     }
 
-    // Chrome/Firefox : hls.js
+    // Cas 4 : Navigateurs modernes supportant MediaSource Extensions (MSE) via hls.js
     if (Hls.isSupported()) {
       const hls = new Hls({ lowLatencyMode: false });
       hls.loadSource(trimmedSrc);
@@ -66,7 +86,7 @@ export default function HlsPlayer({
 
       hls.on(Hls.Events.ERROR, (_event, data) => {
         if (!data.fatal) return;
-        // Erreurs réseau (ex: 404 sur master.m3u8) → bascule MP4 si dispo
+        // En cas d'erreur fatale réseau (ex: 404 sur master.m3u8), bascule automatique sur le MP4 de secours
         if (data.type === ErrorTypes.NETWORK_ERROR && trimmedMp4) {
           hls.destroy();
           video.src = trimmedMp4;
@@ -82,7 +102,7 @@ export default function HlsPlayer({
       };
     }
 
-    // Pas de support HLS du tout → MP4 fallback ou erreur
+    // Cas 5 : Aucun support HLS mais fichier MP4 présent
     if (trimmedMp4) {
       video.src = trimmedMp4;
       setUsingMp4(true);

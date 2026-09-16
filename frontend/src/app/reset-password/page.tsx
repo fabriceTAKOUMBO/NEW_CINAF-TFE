@@ -42,7 +42,10 @@ function validate(form: ResetForm): FormErrors {
   return errors;
 }
 
-// Enveloppe Suspense pour useSearchParams (requis par Next.js 14 App Router)
+/**
+ * Page de réinitialisation de mot de passe enveloppée dans un Suspense.
+ * Requis par Next.js App Router pour sécuriser la lecture des SearchParams (`?token=`).
+ */
 export default function ResetPasswordPage() {
   return (
     <Suspense fallback={<div className="d-flex justify-content-center py-5"><div className="spinner-border text-warning" /></div>}>
@@ -51,6 +54,17 @@ export default function ResetPasswordPage() {
   );
 }
 
+/**
+ * Contenu interactif de réinitialisation de mot de passe.
+ * 
+ * Fonctionnalités :
+ * - Extrait le jeton de sécurité (`token`) passé en paramètre d'URL.
+ * - Valide la saisie et la confirmation du nouveau mot de passe.
+ * - Appelle l'API `auth.resetPassword(token, password)`.
+ * - Redirige automatiquement l'utilisateur vers `/login` après 3 secondes en cas de succès.
+ * 
+ * @returns Le formulaire de saisie du nouveau mot de passe ou un message d'erreur si le token est manquant.
+ */
 function ResetPasswordContent() {
   const router = useRouter();
   const searchParams = useSearchParams();

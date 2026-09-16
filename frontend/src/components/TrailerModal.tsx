@@ -1,18 +1,41 @@
 "use client";
 
-// ============================================================
-// CINAF v2 — Modal bande-annonce (Bootstrap modal + BunnyPlayer)
-// ============================================================
+/**
+ * ============================================================
+ * CINAF v2 — Modal bande-annonce (Bootstrap Modal + BunnyPlayer)
+ * ============================================================
+ * Ce composant affiche une fenêtre modale plein écran dédiée au visionnage
+ * de la bande-annonce d'un film ou d'une série.
+ * 
+ * Intégration et cycle de vie :
+ * - Charge dynamiquement la bibliothèque JavaScript de Bootstrap côté client.
+ * - Instancie une fenêtre modale Bootstrap avec gestion des touches (Échap) et du backdrop.
+ * - Synchronise l'événement de fermeture natif (`hidden.bs.modal`) avec le callback React `onClose`.
+ * - Détruit proprement l'instance Bootstrap (`dispose()`) au démontage pour éviter les fuites de mémoire.
+ * - Démarre automatiquement la lecture vidéo via `BunnyPlayer` dès l'ouverture.
+ */
 
 import { useEffect, useRef } from "react";
 import BunnyPlayer from "./BunnyPlayer";
 
+/**
+ * Propriétés attendues par le composant `TrailerModal`.
+ */
 interface TrailerModalProps {
+  /** Identifiant Bunny Video ID de la bande-annonce */
   trailerBunnyId: string;
+  /** État d'affichage de la modale (true = affichée, false = masquée) */
   show: boolean;
+  /** Fonction de rappel invoquée lors de la fermeture de la modale */
   onClose: () => void;
 }
 
+/**
+ * Modale de lecture de bande-annonce vidéo.
+ * 
+ * @param props - Propriétés de la modale
+ * @returns La modale Bootstrap contenant le lecteur vidéo Bunny
+ */
 export default function TrailerModal({
   trailerBunnyId,
   show,
@@ -27,7 +50,7 @@ export default function TrailerModal({
 
     let bsModal: { show: () => void; hide: () => void; dispose: () => void } | null = null;
 
-    // Chargement dynamique de Bootstrap
+    // Chargement asynchrone du bundle JavaScript Bootstrap
     import("bootstrap/dist/js/bootstrap.bundle.min.js").then((bs) => {
       if (!modalRef.current) return;
       

@@ -8,6 +8,15 @@
 import { Suspense } from "react";
 import WorksListView from "@/components/WorksListView";
 
+/**
+ * Page catalogue unifiée de CINAF.
+ * 
+ * Rôle :
+ * - Présente l'ensemble des films et séries avec bascule par onglets (`showKindTabs`).
+ * - Gère la pagination et la recherche plein texte via le composant réutilisable `WorksListView`.
+ * 
+ * @returns La vue catalogue complète.
+ */
 export default function CataloguePage() {
   return (
     <Suspense

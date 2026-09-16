@@ -15,6 +15,17 @@ type Tab = "all" | "image" | "video";
 
 const ZONE_STORAGE_KEY = "cinaf.bunny.zone";
 
+/**
+ * Explorateur de fichiers et stockage Bunny.net pour les administrateurs.
+ * 
+ * Fonctionnalités :
+ * - Liste des Storage Zones Bunny disponibles (`bunny.listZones`).
+ * - Navigation dans l'arborescence des dossiers et sous-dossiers.
+ * - Filtrage par type de fichier (Tous, Images, Vidéos).
+ * - Aperçu instantané des affiches et vérification des URLs publiques CDN.
+ * 
+ * @returns L'explorateur de stockage Bunny Storage.
+ */
 export default function AdminBunnyPage() {
   // La garde ROLE_ADMIN (redirection + écran de vérification) est entièrement
   // assurée par app/admin/layout.tsx : cette page n'est montée que pour un admin

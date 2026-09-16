@@ -11,6 +11,15 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { studioFilms } from "@/lib/api";
 
+/**
+ * Page de création d'un nouveau film par le créateur de studio.
+ * 
+ * Processus en deux temps (UX fluide) :
+ * 1. Création rapide du brouillon avec les métadonnées de base (titre, synopsis, année, durée).
+ * 2. Redirection immédiate vers `/studio/films/[id]/edit` pour téléverser l'affiche et le fichier vidéo.
+ * 
+ * @returns Le formulaire de création de film.
+ */
 export default function NewFilmPage() {
   const router = useRouter();
   const [submitting, setSubmitting] = useState(false);

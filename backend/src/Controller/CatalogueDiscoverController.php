@@ -177,12 +177,25 @@ class CatalogueDiscoverController extends AbstractController
             $totalSeries = $this->serieRepo->countAll(Serie::STATUS_PUBLISHED, null, $q);
         }
 
+        // `poster` : URL CDN absolue (zone des visuels) ou null — le front
+        // retombe alors sur son affiche générée. Absent en source `bunny`,
+        // qui ne connaît que l'arborescence vidéo.
         $data = [];
         foreach ($films as $f) {
-            $data[] = ['slug' => $f->getSlug(), 'title' => $f->getTitle(), 'kind' => 'film'];
+            $data[] = [
+                'slug' => $f->getSlug(),
+                'title' => $f->getTitle(),
+                'kind' => 'film',
+                'poster' => $f->getPoster(),
+            ];
         }
         foreach ($series as $s) {
-            $data[] = ['slug' => $s->getSlug(), 'title' => $s->getTitle(), 'kind' => 'serie'];
+            $data[] = [
+                'slug' => $s->getSlug(),
+                'title' => $s->getTitle(),
+                'kind' => 'serie',
+                'poster' => $s->getPoster(),
+            ];
         }
         usort($data, fn($a, $b) => strcasecmp($a['title'], $b['title']));
 
@@ -268,6 +281,7 @@ class CatalogueDiscoverController extends AbstractController
             'slug' => $film->getSlug(),
             'title' => $film->getTitle(),
             'kind' => 'film',
+            'poster' => $film->getPoster(),
             // Référence studio (null en mode catalogue Bunny live, sinon dérivée de l'entité)
             // — permet à la page détail d'afficher « Publié par {studio} » avec lien vers la chaîne.
             'studio' => $this->mapStudioRef($film->getStudio()),
@@ -305,6 +319,7 @@ class CatalogueDiscoverController extends AbstractController
             'slug' => $serie->getSlug(),
             'title' => $serie->getTitle(),
             'kind' => 'serie',
+            'poster' => $serie->getPoster(),
             // Cf. mapFilmToDiscover.
             'studio' => $this->mapStudioRef($serie->getStudio()),
             'seasons' => $seasons,

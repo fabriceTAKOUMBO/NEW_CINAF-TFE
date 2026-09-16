@@ -8,6 +8,9 @@ import { Suspense } from "react";
 import { useParams } from "next/navigation";
 import WatchView from "@/components/WatchView";
 
+/**
+ * Page de lecture vidéo d'un épisode de série, enveloppée dans Suspense pour gérer les paramètres d'URL (`?ep=&s=`).
+ */
 export default function WatchEpisodePage() {
   return (
     <Suspense
@@ -22,6 +25,9 @@ export default function WatchEpisodePage() {
   );
 }
 
+/**
+ * Composant de lecture pour un épisode, intégrant le lecteur HLS sécurisé `WatchView`.
+ */
 function WatchEpisodeContent() {
   const params = useParams();
   const slug = params.id as string;

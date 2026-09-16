@@ -18,6 +18,19 @@ interface LoginForm {
   password: string;
 }
 
+/**
+ * Page de connexion utilisateur pour la plateforme CINAF.
+ * 
+ * Fonctionnalités :
+ * - Fournit les champs sécurisés pour la saisie de l'email et du mot de passe.
+ * - Bascule visuelle pour masquer/afficher le mot de passe en clair.
+ * - Appelle la méthode `login` du contexte `AuthProvider` pour échanger les identifiants
+ *   contre des jetons JWT et initialiser le profil utilisateur.
+ * - Redirige vers la page d'accueil ou l'URL de retour en cas de succès.
+ * - Affiche les messages d'erreur explicites lors d'identifiants incorrects ou d'erreurs réseau.
+ * 
+ * @returns Le formulaire de connexion stylisé CINAF.
+ */
 export default function LoginPage() {
   // Récupération de la méthode login du contexte d'authentification
   const { login } = useAuth();

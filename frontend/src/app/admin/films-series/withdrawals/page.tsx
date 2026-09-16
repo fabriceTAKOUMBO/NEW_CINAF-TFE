@@ -28,6 +28,16 @@ const TAB_LABELS: Record<WithdrawalStatus, string> = {
   REJECTED: "Rejetées",
 };
 
+/**
+ * File d'administration des demandes de retrait de films ou de séries initiées par les studios.
+ * 
+ * Fonctionnalités :
+ * - Onglets de filtrage par état : En attente (`PENDING`), Approuvées (`APPROVED`), Rejetées (`REJECTED`).
+ * - Affiche le motif formulé par le studio producteur.
+ * - Ouvre la modale `WithdrawalReviewModal` pour valider ou rejeter la demande avec réponse administrative.
+ * 
+ * @returns La page de traitement des retraits de catalogue.
+ */
 export default function AdminWithdrawalsPage() {
   const [tab, setTab] = useState<WithdrawalStatus>("PENDING");
   const [items, setItems] = useState<WithdrawalRequest[]>([]);

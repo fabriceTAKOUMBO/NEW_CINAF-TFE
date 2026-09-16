@@ -13,6 +13,18 @@ import { discover, type DiscoverWork } from "@/lib/api";
 import WorkDetailHero from "@/components/WorkDetailHero";
 import EpisodeList from "@/components/EpisodeList";
 
+/**
+ * Fiche détaillée d'une série télévisée.
+ * 
+ * Fonctionnalités :
+ * - Charge l'arborescence complète de la série (saisons et épisodes) via son slug (`discover.get`).
+ * - Redirige vers `/films/[id]` si l'œuvre est identifiée comme un film.
+ * - Affiche le hero cinématographique (`WorkDetailHero`) avec bouton pour lancer le 1er épisode.
+ * - Permet de basculer entre les différentes saisons via un sélecteur d'onglets.
+ * - Restitue la grille des épisodes correspondants avec durée et statut de visionnage.
+ * 
+ * @returns La vue détaillée de la série.
+ */
 export default function SerieDetailPage() {
   const params = useParams();
   const slug = params.id as string;

@@ -26,6 +26,19 @@ const STATUS_OPTIONS: Array<{ value: "" | ContentStatus; label: string }> = [
   { value: "WITHDRAWN", label: "Retiré" },
 ];
 
+/**
+ * Page de gestion et de listing des films produits par le studio connecté.
+ * 
+ * Fonctionnalités :
+ * - Liste paginée avec filtre par statut (`DRAFT`, `PUBLISHED`, `WITHDRAWN`).
+ * - Actions rapides :
+ *   - Éditer les métadonnées et la vidéo d'un film (`/studio/films/[id]/edit`).
+ *   - Publier immédiatement un brouillon (`studioFilms.publish`).
+ *   - Supprimer définitivement un brouillon non publié (`studioFilms.remove`).
+ *   - Demander le retrait motivé d'un film déjà publié via le modal `WithdrawalDialog`.
+ * 
+ * @returns La vue de gestion du catalogue de films du studio.
+ */
 export default function StudioFilmsListPage() {
   const router = useRouter();
   const [page, setPage] = useState(1);

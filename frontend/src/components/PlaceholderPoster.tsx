@@ -1,14 +1,33 @@
-// ============================================================
-// CINAF v2 — Affiche placeholder dorée (avant que les vrais
-// posters soient uploadés sur Bunny pour chaque œuvre).
-// ============================================================
+/**
+ * ============================================================
+ * CINAF v2 — Affiche de substitution graphique (PlaceholderPoster)
+ * ============================================================
+ * Ce composant génère dynamiquement une affiche visuelle élégante aux couleurs
+ * de la charte CINAF (fond dégradé noir/or et initiales dorées) lorsqu'aucun
+ * fichier image n'est disponible sur le CDN pour une œuvre.
+ * 
+ * Conception :
+ * - Extrait jusqu'à 3 lettres initiales du titre nettoyé pour composer le sigle central.
+ * - Affiche le titre complet en petits caractères sous les initiales avec troncature.
+ * - Respecte le ratio demandé ("portrait" 2:3, "square" 1:1 ou "wide" 16:9).
+ */
 
+/**
+ * Propriétés attendues par le composant `PlaceholderPoster`.
+ */
 interface PlaceholderPosterProps {
+  /** Titre de l'œuvre à afficher */
   title: string;
-  /** "portrait" (2/3) ou "square" (1/1) ou "wide" (16/9). */
+  /** Format de cadrage ("portrait", "square" ou "wide") */
   ratio?: "portrait" | "square" | "wide";
 }
 
+/**
+ * Affiche générée synthétiquement aux couleurs de la marque CINAF.
+ * 
+ * @param props - Propriétés du composant
+ * @returns Le conteneur visuel stylisé
+ */
 export default function PlaceholderPoster({
   title,
   ratio = "portrait",
@@ -16,7 +35,7 @@ export default function PlaceholderPoster({
   const aspect =
     ratio === "wide" ? "16 / 9" : ratio === "square" ? "1 / 1" : "2 / 3";
 
-  // Initiales (max 3 caractères) en grand au centre
+  // Extraction des initiales du titre (jusqu'à 3 lettres en majuscule)
   const initials = title
     .replace(/[_-]+/g, " ")
     .split(/\s+/)
@@ -45,6 +64,7 @@ export default function PlaceholderPoster({
       }}
       aria-label={`Affiche ${title}`}
     >
+      {/* Sigle central composé des initiales */}
       <span
         style={{
           fontSize: "clamp(1.5rem, 4vw, 2.6rem)",
@@ -55,6 +75,7 @@ export default function PlaceholderPoster({
       >
         {initials || "?"}
       </span>
+      {/* Rappel lisible du titre complet */}
       <span
         style={{
           fontSize: "0.75rem",

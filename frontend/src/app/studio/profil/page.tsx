@@ -4,6 +4,17 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { studio, type Studio, type UpdateStudioPayload } from "@/lib/api";
 
+/**
+ * Page d'édition du profil du studio connecté.
+ * 
+ * Fonctionnalités :
+ * - Charge les métadonnées existantes du studio (`studio.getMe`).
+ * - Permet de modifier le nom commercial et la description du studio.
+ * - Ne soumet que les champs ayant été réellement modifiés (`UpdateStudioPayload`).
+ * - Gère les erreurs de duplication de nom (HTTP 409 Conflict).
+ * 
+ * @returns Le formulaire de modification du profil studio.
+ */
 export default function ProfilStudioPage() {
   const [current, setCurrent] = useState<Studio | null>(null);
   const [name, setName] = useState("");

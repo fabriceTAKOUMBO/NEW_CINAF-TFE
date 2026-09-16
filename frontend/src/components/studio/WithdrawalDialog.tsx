@@ -1,20 +1,41 @@
 "use client";
 
-// ============================================================
-// CINAF v2 — Modale de demande de retrait (studio)
-// Le studio saisit un motif (>= 10 caractères) qui sera
-// envoyé via studioFilms.withdraw / studioSeries.withdraw.
-// ============================================================
+/**
+ * ============================================================
+ * CINAF v2 — Boîte de dialogue de demande de retrait (studio)
+ * ============================================================
+ * Ce composant permet à un producteur d'initier une procédure formelle
+ * de retrait d'un contenu en ligne (film ou série).
+ * 
+ * Contraintes métier & UX :
+ * - Motif obligatoire avec seuil minimal de 10 caractères pour justifier la démarche.
+ * - Compteur de caractères dynamique en temps réel.
+ * - Gestion du verrouillage pendant l'envoi asynchrone (`submitting`).
+ * - Affichage des messages d'erreur retournés par le backend en cas d'échec.
+ */
 
 import { useEffect, useState } from "react";
 
+/**
+ * Propriétés attendues par le composant `WithdrawalDialog`.
+ */
 interface WithdrawalDialogProps {
+  /** Indique si la modale est ouverte */
   open: boolean;
+  /** Titre personnalisé de la modale */
   title?: string;
+  /** Fonction appelée lors de la fermeture ou annulation */
   onClose: () => void;
+  /** Fonction appelée avec le motif validé lors de la soumission */
   onSubmit: (reason: string) => void | Promise<void>;
 }
 
+/**
+ * Fenêtre de dialogue modale pour la soumission d'une demande de dépublication.
+ * 
+ * @param props - Propriétés du dialogue
+ * @returns La modale de saisie du motif de retrait
+ */
 export default function WithdrawalDialog({
   open,
   title,
@@ -25,6 +46,7 @@ export default function WithdrawalDialog({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Réinitialisation de l'état local à chaque ouverture
   useEffect(() => {
     if (open) {
       setReason("");
@@ -33,6 +55,9 @@ export default function WithdrawalDialog({
     }
   }, [open]);
 
+  /**
+   * Traitement de la soumission du formulaire avec validation de longueur minimale.
+   */
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const trimmed = reason.trim();
@@ -57,11 +82,13 @@ export default function WithdrawalDialog({
 
   return (
     <>
+      {/* Fond obscurci (backdrop) */}
       <div
         className="modal-backdrop fade show"
         style={{ zIndex: 1050 }}
         onClick={submitting ? undefined : onClose}
       />
+      {/* Conteneur de la boîte de dialogue */}
       <div
         className="modal fade show d-block"
         tabIndex={-1}

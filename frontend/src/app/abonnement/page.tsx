@@ -20,6 +20,11 @@ const STRIPE_PK = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY ?? "";
 
 // Singleton stripe-js promise — ne se charge qu'une fois par navigation.
 let stripePromise: Promise<Stripe | null> | null = null;
+
+/**
+ * Initialise ou retourne l'instance Singleton du SDK Stripe JS client.
+ * Évite les recharges multiples de la librairie Stripe lors des navigations internes.
+ */
 function getStripe(): Promise<Stripe | null> {
   if (stripePromise === null) {
     stripePromise = STRIPE_PK ? loadStripe(STRIPE_PK) : Promise.resolve(null);
@@ -27,6 +32,17 @@ function getStripe(): Promise<Stripe | null> {
   return stripePromise;
 }
 
+/**
+ * Page de tarification et de souscription aux abonnements CINAF.
+ * 
+ * Fonctionnalités :
+ * - Liste les plans d'abonnement disponibles (mensuel, annuel) avec leurs avantages.
+ * - Intègre le composant Stripe Embedded Checkout directement dans la page pour éviter
+ *   les redirections externes et maximiser le taux de conversion.
+ * - Redirige vers `/login?next=/abonnement` si l'utilisateur n'est pas authentifié lors du clic.
+ * 
+ * @returns La vue de tarification et d'encaissement Stripe.
+ */
 export default function AbonnementPage() {
   const { isAuthenticated, isLoading: authLoading, refresh } = useAuth();
   const router = useRouter();

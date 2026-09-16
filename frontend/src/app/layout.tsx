@@ -26,6 +26,9 @@ const geistMono = localFont({
   weight: "100 900",
 });
 
+/**
+ * Métadonnées globales de l'application Next.js (SEO, OpenGraph, Favicon).
+ */
 export const metadata: Metadata = {
   title: {
     default: "CINAF v2 — Le cinéma africain à portée de clic",
@@ -36,6 +39,20 @@ export const metadata: Metadata = {
   keywords: ["streaming", "films africains", "cinéma africain", "séries africaines"],
 };
 
+/**
+ * Layout racine (Root Layout) de toute l'application CINAF.
+ * 
+ * Rôle architectural :
+ * - Charge les polices variables Geist et Geist Mono.
+ * - Injecte les styles globaux (Bootstrap dark theme, Bootstrap Icons, styles CINAF).
+ * - Enveloppe l'arbre React dans `AuthProvider` (session JWT) et `UploadProvider` (pipeline d'upload).
+ * - Intègre `ConditionalChrome` (affichage conditionnel de la Navbar/Footer hors back-office studio).
+ * - Fournit le tiroir global `UploadTray` pour le suivi des téléversements en arrière-plan.
+ * - Initialise le bundle JavaScript Bootstrap via `BootstrapClient`.
+ * 
+ * @param props.children - Les composants et pages enfants à restituer.
+ * @returns L'arborescence HTML principale configurée pour CINAF.
+ */
 export default function RootLayout({
   children,
 }: Readonly<{

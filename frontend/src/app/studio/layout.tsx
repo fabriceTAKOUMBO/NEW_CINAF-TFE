@@ -19,6 +19,19 @@ const NAV: Array<{ href: string; label: string; icon: string }> = [
   { href: "/studio/profil", label: "Modifier le profil", icon: "bi-pencil-square" },
 ];
 
+/**
+ * Layout dédié au back-office des créateurs et producteurs CINAF (/studio/*).
+ * 
+ * Sécurité et Rôles :
+ * - Vérifie l'authentification et le rôle `ROLE_CREATEUR` via le helper `isStudio(user)`.
+ * - Redirige les utilisateurs non connectés vers `/login?next=/studio`.
+ * - Redirige les utilisateurs non créateurs vers `/` (accueil).
+ * - Offre une barre latérale persistante avec liens vers le tableau de bord, les films,
+ *   les séries, la gestion du profil studio et le retour à la plateforme publique.
+ * 
+ * @param props.children - Les pages du sous-espace studio.
+ * @returns L'environnement de gestion studio avec sidebar.
+ */
 export default function StudioLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();

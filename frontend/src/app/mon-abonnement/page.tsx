@@ -56,6 +56,17 @@ function formatLongDate(iso: string | null | undefined): string {
   });
 }
 
+/**
+ * Page dédiée à la gestion fine de l'abonnement de l'utilisateur.
+ * 
+ * Fonctionnalités :
+ * - Affiche en temps réel le statut calculé (`SubState` : actif, résiliation programmée, expiré, néant).
+ * - Modal interactive pour confirmer la résiliation différée (qui préserve l'accès jusqu'à la fin de la période payée).
+ * - Bouton de reprise immédiate ("Annuler la résiliation") qui rétablit les prélèvements sans rupture d'accès.
+ * - Intègre la table des règlements `PaymentsHistoryTable`.
+ * 
+ * @returns La vue complète de gestion de l'abonnement.
+ */
 export default function MonAbonnementPage() {
   const router = useRouter();
   const { user, isAuthenticated, isLoading, refresh } = useAuth();

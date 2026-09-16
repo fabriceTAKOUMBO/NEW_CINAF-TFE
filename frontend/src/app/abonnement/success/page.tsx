@@ -18,6 +18,10 @@ import { useAuth } from "@/lib/auth";
 import { subscriptions } from "@/lib/api";
 import type { StripeSessionStatus } from "@/lib/api";
 
+/**
+ * Contenu interactif de confirmation de commande Stripe.
+ * Gère le polling progressif pour absorber le délai d'arrivée du webhook Stripe sur Symfony.
+ */
 function SuccessContent() {
   const searchParams = useSearchParams();
   const sessionId = searchParams.get("session_id");
@@ -163,6 +167,9 @@ function SuccessContent() {
   );
 }
 
+/**
+ * Page de confirmation de succès de paiement Stripe enveloppée dans Suspense.
+ */
 export default function AbonnementSuccessPage() {
   return (
     <Suspense fallback={

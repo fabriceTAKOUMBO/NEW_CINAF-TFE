@@ -829,6 +829,12 @@ export const subscriptions = {
  * Toutes les routes sont protégées par ROLE_ADMIN.
  */
 export const adminSubscriptions = {
+  /**
+   * Récupère l'abonnement actif d'un utilisateur spécifié par son identifiant.
+   * 
+   * @param userId - Identifiant UUID de l'utilisateur
+   * @returns L'abonnement courant de l'utilisateur, ou null s'il n'en a pas
+   */
   getCurrent(userId: string): Promise<UserSubscription | null> {
     return request<{ subscription: UserSubscription | null }>(
       "GET",
@@ -838,6 +844,13 @@ export const adminSubscriptions = {
     ).then((d) => d.subscription);
   },
 
+  /**
+   * Attribue manuellement un plan d'abonnement à un utilisateur (contournement administratif sans Stripe).
+   * 
+   * @param userId - Identifiant UUID de l'utilisateur
+   * @param planId - Identifiant UUID du plan d'abonnement choisi
+   * @returns L'abonnement créé et activé
+   */
   assign(userId: string, planId: string): Promise<UserSubscription> {
     return request<UserSubscription>(
       "POST",
@@ -850,6 +863,10 @@ export const adminSubscriptions = {
   /**
    * Modifie l'abonnement actif (plan et/ou date de début).
    * `endsAt` est recalculé côté backend à partir du plan et de startsAt.
+   * 
+   * @param userId - Identifiant UUID de l'utilisateur
+   * @param data - Données du plan ou de la date de début modifiée
+   * @returns L'abonnement actualisé
    */
   update(userId: string, data: { planId?: string; startsAt?: string }): Promise<UserSubscription> {
     return request<UserSubscription>(
@@ -864,6 +881,9 @@ export const adminSubscriptions = {
    * Résilie l'abonnement actif d'un utilisateur en mode différé.
    * Le backend remplit `canceledAt` mais conserve `status=ACTIVE` ; l'accès
    * reste effectif jusqu'à `endsAt`. Aucun prélèvement futur côté Stripe.
+   * 
+   * @param userId - Identifiant UUID de l'utilisateur
+   * @returns Message de confirmation et abonnement mis à jour
    */
   cancel(userId: string): Promise<{ message: string; subscription: UserSubscription }> {
     return request<{ message: string; subscription: UserSubscription }>(
@@ -877,6 +897,9 @@ export const adminSubscriptions = {
   /**
    * Annule la résiliation différée d'un utilisateur (réactivation).
    * Remet `canceledAt` à null côté backend ; le cycle de facturation reprend.
+   * 
+   * @param userId - Identifiant UUID de l'utilisateur
+   * @returns Message de succès et abonnement réactivé
    */
   resume(userId: string): Promise<{ message: string; subscription: UserSubscription }> {
     return request<{ message: string; subscription: UserSubscription }>(
@@ -890,6 +913,9 @@ export const adminSubscriptions = {
   /**
    * Récupère l'historique des paiements Stripe de l'utilisateur ciblé.
    * Retourne un tableau vide si l'utilisateur n'a pas de Stripe customer.
+   * 
+   * @param userId - Identifiant UUID de l'utilisateur
+   * @returns Liste des factures/paiements Stripe
    */
   getPayments(userId: string): Promise<Payment[]> {
     return request<Payment[]>(
@@ -922,6 +948,12 @@ export interface DiscoverWorkSummary {
   slug: string;
   title: string;
   kind: DiscoverKind;
+  /**
+   * URL CDN absolue de l'affiche (zone des visuels), ou null si l'œuvre n'en a
+   * pas. Absent en source catalogue `bunny`, qui ne connaît que l'arborescence
+   * vidéo — d'où l'optionnalité. Le repli est `PlaceholderPoster`.
+   */
+  poster?: string | null;
 }
 
 /**
@@ -1006,6 +1038,12 @@ export type AdminRole = (typeof ADMIN_ROLES)[number];
  * Tous protégés par ROLE_ADMIN côté backend (`access_control: ^/api/admin → ROLE_ADMIN`).
  */
 export const adminUsers = {
+  /**
+   * Récupère la liste paginée et filtrée des utilisateurs du système.
+   * 
+   * @param params - Paramètres optionnels de pagination, recherche textuelle et filtrage par rôle
+   * @returns Une promesse contenant la liste paginée d'utilisateurs enrichis
+   */
   list(params: AdminUsersListParams = {}): Promise<PaginatedResult<AdminUser>> {
     const qs = new URLSearchParams();
     if (params.page) qs.set("page", String(params.page));
@@ -1016,32 +1054,74 @@ export const adminUsers = {
     return request<PaginatedResult<AdminUser>>("GET", `/admin/users${suffix}`, undefined, true);
   },
 
+  /**
+   * Récupère les détails complets d'un utilisateur par son identifiant unique.
+   * 
+   * @param id - Identifiant UUID de l'utilisateur
+   * @returns Les informations détaillées de l'utilisateur
+   */
   get(id: string): Promise<AdminUser> {
     return request<AdminUser>("GET", `/admin/users/${id}`, undefined, true);
   },
 
+  /**
+   * Met à jour les coordonnées de base d'un utilisateur (email, nom, prénom, statut de vérification).
+   * 
+   * @param id - Identifiant UUID de l'utilisateur
+   * @param data - Champs modifiables
+   * @returns L'utilisateur mis à jour
+   */
   update(id: string, data: Partial<Pick<AdminUser, "email" | "firstName" | "lastName" | "isVerified">>): Promise<AdminUser> {
     return request<AdminUser>("PATCH", `/admin/users/${id}`, data, true);
   },
 
+  /**
+   * Modifie les rôles de sécurité attribués à un utilisateur (ex: promotion admin ou studio).
+   * 
+   * @param id - Identifiant UUID de l'utilisateur
+   * @param roles - Nouveau tableau de rôles de sécurité (ex: ['ROLE_USER', 'ROLE_CREATEUR'])
+   * @returns L'utilisateur mis à jour avec ses nouveaux rôles
+   */
   updateRole(id: string, roles: string[]): Promise<AdminUser> {
     return request<AdminUser>("PATCH", `/admin/users/${id}/role`, { roles }, true);
   },
 
+  /**
+   * Suspend temporairement l'accès au compte d'un utilisateur (blocage de connexion).
+   * 
+   * @param id - Identifiant UUID de l'utilisateur
+   * @returns L'utilisateur avec son statut suspendu
+   */
   suspend(id: string): Promise<AdminUser> {
     return request<AdminUser>("PATCH", `/admin/users/${id}/suspend`, {}, true);
   },
 
+  /**
+   * Réactive un compte utilisateur précédemment suspendu.
+   * 
+   * @param id - Identifiant UUID de l'utilisateur
+   * @returns L'utilisateur réactivé
+   */
   activate(id: string): Promise<AdminUser> {
     return request<AdminUser>("PATCH", `/admin/users/${id}/activate`, {}, true);
   },
 
+  /**
+   * Supprime définitivement un utilisateur de la base de données (action irréversible RGPD).
+   * 
+   * @param id - Identifiant UUID de l'utilisateur
+   */
   remove(id: string): Promise<void> {
     return request<void>("DELETE", `/admin/users/${id}`, undefined, true);
   },
 
-  /** URL d'export CSV — l'admin la déclenche via window.open + Authorization header impossible.
-   *  À la place, fetch + Blob + triggerDownload est exposé ici. */
+  /**
+   * Télécharge un export CSV complet de la base utilisateurs (autorisé admin uniquement).
+   * Réalisé par fetch + Blob pour injecter l'en-tête `Authorization: Bearer <token>`.
+   * 
+   * @returns Un objet Blob contenant les données CSV brutes
+   * @throws {ApiError} En cas d'échec HTTP ou d'absence de droits
+   */
   async exportCsv(): Promise<Blob> {
     const token = typeof window !== "undefined" ? localStorage.getItem("access_token") : null;
     const res = await fetch(`${BASE_URL}/admin/users/export`, {
@@ -1413,21 +1493,42 @@ function uploadRequestXHR<T>(
   });
 }
 
-/** GET /api/studio/me → studio + stats. */
+/**
+ * Endpoints d'information et de configuration du studio du créateur connecté.
+ * Requièrent le rôle ROLE_CREATEUR.
+ */
 export const studio = {
+  /**
+   * Récupère le profil du studio ainsi que les statistiques agrégées (films, séries, abonnés chaîne).
+   * 
+   * @returns Le studio courant et ses compteurs statistiques
+   */
   getMe(): Promise<StudioMeResponse> {
     return request<StudioMeResponse>("GET", "/studio/me");
   },
+
+  /**
+   * Met à jour les informations textuelles du studio (nom, description).
+   * 
+   * @param payload - Données à mettre à jour
+   * @returns Le studio mis à jour
+   */
   updateMe(payload: UpdateStudioPayload): Promise<Studio> {
     return request<Studio>("PATCH", "/studio/me", payload);
   },
 };
 
 /**
- * CRUD films côté studio.
+ * Opérations CRUD et de publication de films côté studio/producteur.
  * Toutes les méthodes nécessitent ROLE_CREATEUR.
  */
 export const studioFilms = {
+  /**
+   * Liste les films appartenant au studio connecté avec filtrage par statut et pagination.
+   * 
+   * @param params - Filtres optionnels (statut: DRAFT/PUBLISHED/WITHDRAWN/PENDING_APPROVAL, pagination)
+   * @returns Liste paginée de films studio
+   */
   list(params: {
     status?: ContentStatus;
     page?: number;
@@ -1441,35 +1542,82 @@ export const studioFilms = {
     return request<PaginatedResult<StudioFilm>>("GET", `/studio/films${suffix}`);
   },
 
+  /**
+   * Récupère le détail d'un film pour édition dans l'espace studio.
+   * 
+   * @param id - Identifiant UUID du film
+   * @returns Le film sous sa forme complète studio
+   */
   get(id: string): Promise<StudioFilm> {
     return request<StudioFilm>("GET", `/studio/films/${id}`);
   },
 
+  /**
+   * Crée un nouveau brouillon de film.
+   * 
+   * @param payload - Métadonnées de base du film (titre, synopsis, année, durée)
+   * @returns Le film nouvellement créé (statut initial DRAFT)
+   */
   create(payload: CreateFilmPayload): Promise<StudioFilm> {
     return request<StudioFilm>("POST", "/studio/films", payload);
   },
 
+  /**
+   * Met à jour partiellement les champs d'un film (titre, synopsis, affiche, vidéos).
+   * 
+   * @param id - Identifiant UUID du film
+   * @param payload - Champs modifiés
+   * @returns Le film actualisé
+   */
   update(id: string, payload: UpdateFilmPayload): Promise<StudioFilm> {
     return request<StudioFilm>("PATCH", `/studio/films/${id}`, payload);
   },
 
+  /**
+   * Supprime définitivement un film appartenant au studio (autorisé uniquement si non publié).
+   * 
+   * @param id - Identifiant UUID du film
+   */
   remove(id: string): Promise<void> {
     return request<void>("DELETE", `/studio/films/${id}`);
   },
 
+  /**
+   * Demande la publication d'un film.
+   * Si le studio est déjà validé, le film passe directement en PUBLISHED.
+   * Si le studio n'est pas encore validé, le film passe en PENDING_APPROVAL pour modération admin.
+   * 
+   * @param id - Identifiant UUID du film
+   * @returns Le film avec son nouveau statut
+   */
   publish(id: string): Promise<StudioFilm> {
     return request<StudioFilm>("POST", `/studio/films/${id}/publish`);
   },
 
+  /**
+   * Soumet une demande formelle de retrait pour un film actuellement en ligne.
+   * Crée un enregistrement `WithdrawalRequest` examiné par l'équipe d'administration.
+   * 
+   * @param id - Identifiant UUID du film
+   * @param reason - Motif justifiant la demande de dépublication
+   * @returns La demande de retrait créée avec statut PENDING
+   */
   withdraw(id: string, reason: string): Promise<WithdrawalRequest> {
     return request<WithdrawalRequest>("POST", `/studio/films/${id}/withdraw`, { reason });
   },
 };
 
 /**
- * CRUD séries + saisons + épisodes côté studio.
+ * Opérations CRUD séries, saisons et épisodes côté studio.
+ * Permet la gestion hiérarchique de l'arborescence des séries d'un créateur.
  */
 export const studioSeries = {
+  /**
+   * Liste les séries du studio connecté avec filtres de statut et pagination.
+   * 
+   * @param params - Filtres (status, page, limit)
+   * @returns Liste paginée des séries
+   */
   list(params: {
     status?: ContentStatus;
     page?: number;
@@ -1483,35 +1631,88 @@ export const studioSeries = {
     return request<PaginatedResult<StudioSerie>>("GET", `/studio/series${suffix}`);
   },
 
+  /**
+   * Récupère la fiche détaillée d'une série avec ses saisons et épisodes.
+   * 
+   * @param id - Identifiant UUID de la série
+   * @returns La série complète
+   */
   get(id: string): Promise<StudioSerie> {
     return request<StudioSerie>("GET", `/studio/series/${id}`);
   },
 
+  /**
+   * Crée un nouveau projet de série en brouillon.
+   * 
+   * @param payload - Données initiales (titre, synopsis, année)
+   * @returns La série créée au statut DRAFT
+   */
   create(payload: CreateSeriePayload): Promise<StudioSerie> {
     return request<StudioSerie>("POST", "/studio/series", payload);
   },
 
+  /**
+   * Met à jour les métadonnées globales de la série (affiche, trailer, synopsis).
+   * 
+   * @param id - Identifiant UUID de la série
+   * @param payload - Données partielles
+   * @returns La série mise à jour
+   */
   update(id: string, payload: UpdateSeriePayload): Promise<StudioSerie> {
     return request<StudioSerie>("PATCH", `/studio/series/${id}`, payload);
   },
 
+  /**
+   * Supprime une série du studio.
+   * 
+   * @param id - Identifiant UUID de la série
+   */
   remove(id: string): Promise<void> {
     return request<void>("DELETE", `/studio/series/${id}`);
   },
 
+  /**
+   * Publie la série ou soumet une demande d'approbation selon le statut de validation du studio.
+   * 
+   * @param id - Identifiant UUID de la série
+   * @returns La série avec son nouveau statut
+   */
   publish(id: string): Promise<StudioSerie> {
     return request<StudioSerie>("POST", `/studio/series/${id}/publish`);
   },
 
+  /**
+   * Demande le retrait du catalogue d'une série en ligne.
+   * 
+   * @param id - Identifiant UUID de la série
+   * @param reason - Motif de dépublication
+   * @returns La demande de retrait PENDING
+   */
   withdraw(id: string, reason: string): Promise<WithdrawalRequest> {
     return request<WithdrawalRequest>("POST", `/studio/series/${id}/withdraw`, { reason });
   },
 
-  // Saisons
+  // ── Saisons ──
+
+  /**
+   * Ajoute une nouvelle saison à une série existante.
+   * 
+   * @param serieId - Identifiant UUID de la série parente
+   * @param payload - Numéro, titre optionnel et synopsis de la saison
+   * @returns La saison créée
+   */
   createSeason(serieId: string, payload: CreateSeasonPayload): Promise<StudioSeason> {
     return request<StudioSeason>("POST", `/studio/series/${serieId}/seasons`, payload);
   },
 
+  /**
+   * Modifie les informations d'une saison.
+   * 
+   * @param serieId - Identifiant UUID de la série
+   * @param seasonId - Identifiant UUID de la saison
+   * @param payload - Modifications apportées
+   * @returns La saison mise à jour
+   */
   updateSeason(
     serieId: string,
     seasonId: string,
@@ -1524,11 +1725,26 @@ export const studioSeries = {
     );
   },
 
+  /**
+   * Supprime une saison et l'ensemble de ses épisodes associés.
+   * 
+   * @param serieId - Identifiant UUID de la série
+   * @param seasonId - Identifiant UUID de la saison
+   */
   removeSeason(serieId: string, seasonId: string): Promise<void> {
     return request<void>("DELETE", `/studio/series/${serieId}/seasons/${seasonId}`);
   },
 
-  // Épisodes
+  // ── Épisodes ──
+
+  /**
+   * Ajoute un nouvel épisode à une saison donnée.
+   * 
+   * @param serieId - Identifiant UUID de la série
+   * @param seasonId - Identifiant UUID de la saison parente
+   * @param payload - Numéro, titre, durée et synopsis de l'épisode
+   * @returns L'épisode créé
+   */
   createEpisode(
     serieId: string,
     seasonId: string,
@@ -1541,6 +1757,15 @@ export const studioSeries = {
     );
   },
 
+  /**
+   * Met à jour les détails d'un épisode ou lui associe un fichier vidéo BunnyCDN (`bunnyVideoId`).
+   * 
+   * @param serieId - Identifiant UUID de la série
+   * @param seasonId - Identifiant UUID de la saison
+   * @param episodeId - Identifiant UUID de l'épisode
+   * @param payload - Données partielles
+   * @returns L'épisode mis à jour
+   */
   updateEpisode(
     serieId: string,
     seasonId: string,
@@ -1554,6 +1779,13 @@ export const studioSeries = {
     );
   },
 
+  /**
+   * Supprime un épisode spécifique.
+   * 
+   * @param serieId - Identifiant UUID de la série
+   * @param seasonId - Identifiant UUID de la saison
+   * @param episodeId - Identifiant UUID de l'épisode
+   */
   removeEpisode(serieId: string, seasonId: string, episodeId: string): Promise<void> {
     return request<void>(
       "DELETE",
@@ -1628,7 +1860,16 @@ export type AdminSerieUpdatePayload = Partial<{
   studioId: string | null;
 }>;
 
+/**
+ * Endpoints d'administration globale pour les films (requièrent ROLE_ADMIN).
+ */
 export const adminFilms = {
+  /**
+   * Liste l'ensemble des films de la plateforme avec filtres multi-critères et pagination.
+   * 
+   * @param params - Filtres (statut, studioId, recherche, pagination)
+   * @returns Liste paginée de films au format admin enrichi
+   */
   list(params: AdminFilmsListParams = {}): Promise<PaginatedResult<AdminFilm>> {
     const qs = new URLSearchParams();
     if (params.status) qs.set("status", params.status);
@@ -1640,20 +1881,47 @@ export const adminFilms = {
     return request<PaginatedResult<AdminFilm>>("GET", `/admin/films${suffix}`);
   },
 
+  /**
+   * Récupère le détail d'un film pour modération ou supervision administrative.
+   * 
+   * @param id - Identifiant UUID du film
+   * @returns Le film enrichi des informations du studio propriétaire
+   */
   get(id: string): Promise<AdminFilm> {
     return request<AdminFilm>("GET", `/admin/films/${id}`);
   },
 
+  /**
+   * Modifie unilatéralement les attributs ou le statut d'un film (ex: correction, suspension).
+   * 
+   * @param id - Identifiant UUID du film
+   * @param payload - Champs à mettre à jour
+   * @returns Le film modifié
+   */
   update(id: string, payload: AdminFilmUpdatePayload): Promise<AdminFilm> {
     return request<AdminFilm>("PATCH", `/admin/films/${id}`, payload);
   },
 
+  /**
+   * Supprime définitivement un film et ses liaisons en base de données.
+   * 
+   * @param id - Identifiant UUID du film
+   */
   remove(id: string): Promise<void> {
     return request<void>("DELETE", `/admin/films/${id}`);
   },
 };
 
+/**
+ * Endpoints d'administration globale pour les séries (requièrent ROLE_ADMIN).
+ */
 export const adminSeries = {
+  /**
+   * Liste toutes les séries de la plateforme avec pagination et filtres.
+   * 
+   * @param params - Filtres (statut, studioId, recherche, pagination)
+   * @returns Liste paginée des séries enrichies
+   */
   list(params: AdminFilmsListParams = {}): Promise<PaginatedResult<AdminSerie>> {
     const qs = new URLSearchParams();
     if (params.status) qs.set("status", params.status);
@@ -1665,14 +1933,32 @@ export const adminSeries = {
     return request<PaginatedResult<AdminSerie>>("GET", `/admin/series${suffix}`);
   },
 
+  /**
+   * Récupère une série par son identifiant côté administration.
+   * 
+   * @param id - Identifiant UUID de la série
+   * @returns La série complète avec son studio
+   */
   get(id: string): Promise<AdminSerie> {
     return request<AdminSerie>("GET", `/admin/series/${id}`);
   },
 
+  /**
+   * Modifie les données ou le statut d'une série par l'administrateur.
+   * 
+   * @param id - Identifiant UUID de la série
+   * @param payload - Données partielles
+   * @returns La série modifiée
+   */
   update(id: string, payload: AdminSerieUpdatePayload): Promise<AdminSerie> {
     return request<AdminSerie>("PATCH", `/admin/series/${id}`, payload);
   },
 
+  /**
+   * Supprime définitivement une série de la plateforme.
+   * 
+   * @param id - Identifiant UUID de la série
+   */
   remove(id: string): Promise<void> {
     return request<void>("DELETE", `/admin/series/${id}`);
   },
@@ -1683,6 +1969,11 @@ export const adminSeries = {
  * Endpoint backend : GET /api/admin/studios (créé par Agent 4).
  */
 export const adminStudios = {
+  /**
+   * Récupère la liste de tous les studios existants pour alimenter les listes déroulantes de filtrage.
+   * 
+   * @returns Un objet contenant le tableau de studios
+   */
   list(): Promise<{ data: Studio[] }> {
     return request<{ data: Studio[] }>("GET", "/admin/studios");
   },
@@ -1699,7 +1990,17 @@ export interface AdminWithdrawalApproveResponse {
   target: StudioFilm | StudioSerie;
 }
 
+/**
+ * Gestion du workflow de retrait d'œuvres côté administration.
+ * Permet d'approuver (dépublier) ou de rejeter une demande de retrait soumise par un studio.
+ */
 export const adminWithdrawals = {
+  /**
+   * Liste les demandes de retrait d'œuvres (PENDING, APPROVED, REJECTED).
+   * 
+   * @param params - Filtre de statut et pagination
+   * @returns Liste paginée des demandes de retrait
+   */
   list(params: AdminWithdrawalsListParams = {}): Promise<PaginatedResult<WithdrawalRequest>> {
     const qs = new URLSearchParams();
     if (params.status) qs.set("status", params.status);
@@ -1709,10 +2010,23 @@ export const adminWithdrawals = {
     return request<PaginatedResult<WithdrawalRequest>>("GET", `/admin/withdrawals${suffix}`);
   },
 
+  /**
+   * Récupère les détails d'une demande de retrait spécifique.
+   * 
+   * @param id - Identifiant UUID de la demande
+   * @returns La demande complète
+   */
   get(id: string): Promise<WithdrawalRequest> {
     return request<WithdrawalRequest>("GET", `/admin/withdrawals/${id}`);
   },
 
+  /**
+   * Approuve la demande de retrait : passe le contenu en WITHDRAWN et horodate la décision.
+   * 
+   * @param id - Identifiant UUID de la demande
+   * @param reviewNote - Commentaire administratif optionnel expliquant la décision
+   * @returns La demande validée ainsi que l'entité cible mise à jour
+   */
   approve(id: string, reviewNote?: string): Promise<AdminWithdrawalApproveResponse> {
     return request<AdminWithdrawalApproveResponse>(
       "POST",
@@ -1721,6 +2035,13 @@ export const adminWithdrawals = {
     );
   },
 
+  /**
+   * Rejette la demande de retrait : le contenu reste en ligne (PUBLISHED).
+   * 
+   * @param id - Identifiant UUID de la demande
+   * @param reviewNote - Motif du refus communiqué au producteur
+   * @returns La demande avec le statut REJECTED
+   */
   reject(id: string, reviewNote?: string): Promise<WithdrawalRequest> {
     return request<WithdrawalRequest>(
       "POST",
@@ -1740,13 +2061,19 @@ export interface CreateStudioPayload {
 
 /**
  * Parcours self-service "Je suis producteur" : un utilisateur logué
- * (non-admin) crée son propre studio via le footer.
+ * (non-admin) crée son propre studio via le formulaire de candidature/onboarding.
  *
  * Endpoint backend : POST /api/studio/onboarding.
- * Accessible à tout user authentifié (ROLE_USER suffit) ; l'admin est
- * explicitement refusé (cohérent avec la séparation Phase H).
+ * Accessible à tout utilisateur authentifié (ROLE_USER suffit) ; l'admin est
+ * explicitement refusé afin de préserver l'étanchéité des rôles.
  */
 export const studioOnboarding = {
+  /**
+   * Crée un nouveau studio pour l'utilisateur connecté et lui attribue ROLE_CREATEUR.
+   * 
+   * @param payload - Nom et description du studio
+   * @returns Le studio créé
+   */
   create(payload: CreateStudioPayload): Promise<Studio> {
     return request<Studio>("POST", "/studio/onboarding", payload, true);
   },
@@ -1779,8 +2106,17 @@ export interface AdminApprovalItem {
   } | null;
 }
 
+/**
+ * Gestion de la file d'attente d'approbation des œuvres soumises par de nouveaux studios.
+ * Requièrent ROLE_ADMIN.
+ */
 export const adminApprovals = {
-  /** Liste paginée des films + séries en attente d'approbation. */
+  /**
+   * Liste paginée des films et séries en attente d'approbation préalable (`PENDING_APPROVAL`).
+   * 
+   * @param params - Options de pagination (page, limit)
+   * @returns Liste paginée d'éléments soumis à examen
+   */
   list(params: { page?: number; limit?: number } = {}): Promise<
     PaginatedResult<AdminApprovalItem>
   > {
@@ -1794,10 +2130,23 @@ export const adminApprovals = {
     );
   },
 
+  /**
+   * Valide un film en attente : passe son statut à PUBLISHED et valide le studio s'il ne l'était pas.
+   * 
+   * @param id - Identifiant UUID du film
+   * @returns Le film validé
+   */
   approveFilm(id: string): Promise<StudioFilm> {
     return request<StudioFilm>("PATCH", `/admin/films/${id}/approve`, {});
   },
 
+  /**
+   * Rejette un film en attente : le repasse en DRAFT ou le refuse avec motif.
+   * 
+   * @param id - Identifiant UUID du film
+   * @param reason - Raison du refus
+   * @returns Le film mis à jour
+   */
   rejectFilm(id: string, reason?: string): Promise<StudioFilm> {
     return request<StudioFilm>(
       "PATCH",
@@ -1806,10 +2155,23 @@ export const adminApprovals = {
     );
   },
 
+  /**
+   * Valide une série en attente d'approbation et la rend publique.
+   * 
+   * @param id - Identifiant UUID de la série
+   * @returns La série validée
+   */
   approveSerie(id: string): Promise<StudioSerie> {
     return request<StudioSerie>("PATCH", `/admin/series/${id}/approve`, {});
   },
 
+  /**
+   * Rejette une série en attente d'approbation.
+   * 
+   * @param id - Identifiant UUID de la série
+   * @param reason - Motif explicatif du rejet
+   * @returns La série mise à jour
+   */
   rejectSerie(id: string, reason?: string): Promise<StudioSerie> {
     return request<StudioSerie>(
       "PATCH",
@@ -1989,16 +2351,25 @@ export const studios = {
 // ─── Module paiements ───────────────────────────────────────
 
 /**
- * Services liés à l'historique des paiements et factures.
+ * Services liés à la consultation de l'historique des paiements et téléchargement des factures.
  */
 export const payments = {
-  /** Récupère l'historique des paiements */
+  /**
+   * Récupère la liste de tous les paiements et facturations de l'utilisateur connecté.
+   * 
+   * @returns Un tableau d'enregistrements de paiement (`PaymentRecord[]`)
+   */
   async getHistory(): Promise<PaymentRecord[]> {
     const data = await request<{ payments: PaymentRecord[] }>("GET", "/payments", undefined, true);
     return data.payments;
   },
 
-  /** Récupère les détails d'une facture */
+  /**
+   * Récupère les métadonnées et l'URL du PDF d'une facture spécifique.
+   * 
+   * @param paymentId - Identifiant du paiement
+   * @returns Les informations de la facture associée (`InvoiceInfo`)
+   */
   async getInvoice(paymentId: string): Promise<InvoiceInfo> {
     const data = await request<{ invoice: InvoiceInfo }>(
       "GET",
@@ -2009,3 +2380,4 @@ export const payments = {
     return data.invoice;
   },
 };
+

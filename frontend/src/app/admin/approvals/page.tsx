@@ -19,6 +19,16 @@ import Pagination from "@/components/Pagination";
 
 const PAGE_LIMIT = 20;
 
+/**
+ * File d'approbation et de modération des premières productions de studios.
+ * 
+ * Règle métier CINAF :
+ * - Tout nouveau studio créé en self-service doit faire approuver son premier contenu par un admin.
+ * - L'approbation passe le contenu en `PUBLISHED` et valide définitivement le studio (`isValidated=true`).
+ * - Le refus renvoie le contenu en `DRAFT` avec un motif facultatif, sans valider le studio.
+ * 
+ * @returns La page de modération des approbations en attente.
+ */
 export default function AdminApprovalsPage() {
   const [items, setItems] = useState<AdminApprovalItem[]>([]);
   const [total, setTotal] = useState(0);

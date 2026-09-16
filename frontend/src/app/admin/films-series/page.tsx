@@ -32,6 +32,17 @@ const STATUS_OPTIONS: Array<{ value: "" | ContentStatus; label: string }> = [
 
 type Tab = "films" | "series";
 
+/**
+ * Page de modération et de supervision globale de tous les films et séries de la plateforme.
+ * 
+ * Fonctionnalités administrateur :
+ * - Double onglet Films / Séries.
+ * - Filtres multicritères : statut (Brouillon, Publié, Retiré), studio producteur et recherche textuelle.
+ * - Affichage du badge de demandes de retrait en attente.
+ * - Actions de suppression et d'édition pour les administrateurs.
+ * 
+ * @returns La page de modération globale du catalogue.
+ */
 export default function AdminFilmsSeriesPage() {
   const [tab, setTab] = useState<Tab>("films");
   const [studios, setStudios] = useState<Studio[]>([]);

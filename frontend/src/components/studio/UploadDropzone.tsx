@@ -1,39 +1,54 @@
 "use client";
 
-// ============================================================
-// CINAF v2 — Zone d'upload réutilisable (studio)
-// Drag & drop ou click pour sélectionner un fichier. Le fichier
-// est délégué au UploadProvider qui gère la progression et
-// l'auto-PATCH en arrière-plan via UploadTray. La page peut
-// continuer à éditer ses autres champs librement.
-//
-// La prop `target` détermine à la fois :
-//   - le chemin Bunny (studios/{slug}/{film|serie-slug}/...)
-//   - le champ DB à PATCH après upload (poster, bunnyVideoId, …)
-// ============================================================
+/**
+ * ============================================================
+ * CINAF v2 — Zone d'upload réutilisable (UploadDropzone)
+ * ============================================================
+ * Ce composant permet aux producteurs d'importer des fichiers (affiches ou vidéos)
+ * par glisser-déposer (Drag & Drop) ou clic standard.
+ * 
+ * Fonctionnement découplé et asynchrone :
+ * 1. La sélection d'un fichier délègue la tâche au contexte global `useUploads().enqueue()`.
+ * 2. L'upload se poursuit en arrière-plan sans bloquer la page ni la navigation.
+ * 3. La barre d'état globale `<UploadTray>` prend le relais pour afficher l'avancement.
+ * 4. La prop `target` configure la destination BunnyCDN et déclenche le patch automatique en DB.
+ * 5. Le callback `onUploaded(result)` permet à la page appelante de rafraîchir son aperçu local.
+ */
 
 import { useCallback, useId, useRef, useState } from "react";
 import type { StudioUploadTarget, UploadResult } from "@/lib/api";
 import { targetKind, useUploads } from "@/lib/upload-context";
 
+/**
+ * Propriétés attendues par le composant `UploadDropzone`.
+ */
 interface UploadDropzoneProps {
+  /** Cible d'upload définissant l'entité (film, série, épisode) et le rôle (poster, trailer, video) */
   target: StudioUploadTarget;
-  /** Callback exécuté après upload réussi (rafraîchit l'état local). */
+  /** Fonction de rappel invoquée lors de la finalisation réussie de l'upload et de son enregistrement */
   onUploaded?: (result: UploadResult) => void;
+  /** Chaîne de types MIME acceptés (ex: "image/jpeg,image/png") */
   accept?: string;
-  /** Texte court à afficher au-dessus de la zone. */
+  /** Libellé textuel affiché au-dessus de la zone */
   label?: string;
-  /** Bouton/preview supplémentaire à droite (ex: aperçu courant). */
+  /** Élément JSX optionnel rendu à droite de la zone (ex: miniature ou aperçu actuel) */
   extra?: React.ReactNode;
-  /** Désactive la zone (target pas encore prêt, ex: film pas encore créé). */
+  /** Désactive l'interaction (ex: si l'entité parente n'a pas encore été sauvegardée en base) */
   disabled?: boolean;
 }
 
+/** Types MIME par défaut acceptés pour les vidéos et les images */
 const DEFAULT_ACCEPT: Record<"video" | "image", string> = {
   video: "video/mp4,video/quicktime,video/webm",
   image: "image/jpeg,image/png,image/webp",
 };
 
+/**
+ * Zone de glisser-déposer pour téléversement de médias avec feedback immédiat.
+ * 
+ * @param props - Propriétés du composant
+ * @returns La zone de drop interactive
+ */
 export default function UploadDropzone({
   target,
   onUploaded,
@@ -49,8 +64,12 @@ export default function UploadDropzone({
   const [lastFileName, setLastFileName] = useState<string | null>(null);
   const [hint, setHint] = useState<string | null>(null);
 
+  // Détection automatique du type de média (image pour affiche, vidéo pour trailer/film)
   const kind = targetKind(target);
 
+  /**
+   * Traite le fichier sélectionné et l'ajoute à la file d'attente d'upload.
+   */
   const handleFile = useCallback(
     (file: File) => {
       if (disabled) return;
@@ -64,12 +83,18 @@ export default function UploadDropzone({
     [enqueue, target, onUploaded, disabled],
   );
 
+  /**
+   * Gestionnaire d'événement de sélection via l'explorateur de fichiers natif.
+   */
   function onInputChange(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
     if (f) handleFile(f);
     e.target.value = "";
   }
 
+  /**
+   * Gestionnaire d'événement de dépôt par glisser-déposer.
+   */
   function onDrop(e: React.DragEvent<HTMLDivElement>) {
     e.preventDefault();
     setIsDragOver(false);

@@ -20,6 +20,20 @@ interface AdminTile {
   badgeCount?: number;
 }
 
+/**
+ * Tableau de bord d'accueil de l'administration CINAF (/admin).
+ * 
+ * Rôles et fonctionnalités :
+ * - Présente les différentes tuiles d'accès rapide :
+ *   - Gestion des utilisateurs (/admin/utilisateurs).
+ *   - Stockage et réplication Bunny (/admin/bunny).
+ *   - Modération des Films & Séries (/admin/films-series).
+ *   - Approbations des premiers contenus de studios (/admin/approvals).
+ *   - Demandes de retrait (/admin/films-series/withdrawals).
+ * - Affiche des compteurs en temps réel (ex: nombre d'approbations de contenu en attente).
+ * 
+ * @returns La page d'accueil d'administration.
+ */
 export default function AdminDashboardPage() {
   const { user } = useAuth();
   const [pendingApprovals, setPendingApprovals] = useState<number>(0);

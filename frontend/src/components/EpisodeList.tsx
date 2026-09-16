@@ -1,21 +1,41 @@
-// ============================================================
-// CINAF v2 — Liste d'épisodes soignée (pages détail film/série).
-// Inspiré de cinaf.tv : miniature large + numéro + titre + « Regarder ».
-// Réutilisée pour un film multi-parties et pour chaque saison de série.
-// ============================================================
+/**
+ * ============================================================
+ * CINAF v2 — Liste soignée d'épisodes (EpisodeList)
+ * ============================================================
+ * Composant de présentation détaillée des épisodes pour les pages de séries ou
+ * films divisés en plusieurs parties (façon cinaf.tv).
+ * 
+ * Éléments affichés pour chaque épisode :
+ * - Pastille dorée avec numéro d'épisode (`startNumber + idx`).
+ * - Miniature grand angle (`PlaceholderPoster` au ratio 16:9).
+ * - Titre de l'épisode avec icône de lecture.
+ * - Bouton d'action directe "Regarder" renvoyant vers le lecteur via `hrefFor(ep)`.
+ * - Défilement vertical contraint (`maxHeight: 640px`) au-delà de 8 épisodes pour
+ *   garder la page fluide et ergonomique.
+ */
 
 import Link from "next/link";
 import type { DiscoverEpisode } from "@/lib/api";
 import PlaceholderPoster from "./PlaceholderPoster";
 
+/**
+ * Propriétés attendues par le composant `EpisodeList`.
+ */
 interface EpisodeListProps {
+  /** Liste ordonnée des épisodes de la saison */
   episodes: DiscoverEpisode[];
-  /** Construit l'URL de lecture pour un épisode donné (capture la saison). */
+  /** Fonction construisant l'URL de lecture pour l'épisode donné */
   hrefFor: (ep: DiscoverEpisode) => string;
-  /** Numéro du premier épisode affiché (défaut 1). */
+  /** Index de départ pour la numérotation visuelle (défaut: 1) */
   startNumber?: number;
 }
 
+/**
+ * Liste verticale interactive d'épisodes de série.
+ * 
+ * @param props - Propriétés du composant
+ * @returns La liste d'épisodes ou un message informatif si vide
+ */
 export default function EpisodeList({
   episodes,
   hrefFor,
@@ -27,8 +47,7 @@ export default function EpisodeList({
     );
   }
 
-  // Au-delà de 8 épisodes, on borne la hauteur pour éviter une page interminable
-  // (ex. œuvres ~90 épisodes mal classées en film).
+  // Au-delà de 8 épisodes, on borne la hauteur pour éviter un défilement infini de page
   const scroll = episodes.length > 8;
 
   return (
@@ -48,7 +67,7 @@ export default function EpisodeList({
             borderRadius: 8,
           }}
         >
-          {/* Numéro d'épisode */}
+          {/* Numéro de l'épisode dans la saison */}
           <span
             className="d-inline-flex align-items-center justify-content-center flex-shrink-0"
             style={{
@@ -63,12 +82,12 @@ export default function EpisodeList({
             {startNumber + idx}
           </span>
 
-          {/* Miniature large (placeholder), masquée sur très petit écran */}
+          {/* Miniature large 16:9 masquée sur mobile très étroit */}
           <div className="d-none d-sm-block flex-shrink-0" style={{ width: 120 }}>
             <PlaceholderPoster title={ep.name.replace(/_/g, " ")} ratio="wide" />
           </div>
 
-          {/* Titre de l'épisode */}
+          {/* Titre nettoyé de l'épisode */}
           <span
             className="flex-grow-1 text-truncate"
             style={{ color: "var(--cinaf-text)", fontWeight: 500 }}
@@ -78,6 +97,7 @@ export default function EpisodeList({
             {ep.name.replace(/_/g, " ")}
           </span>
 
+          {/* Bouton de lancement de la lecture */}
           <Link
             href={hrefFor(ep)}
             className="btn btn-sm btn-cinaf-outline flex-shrink-0"

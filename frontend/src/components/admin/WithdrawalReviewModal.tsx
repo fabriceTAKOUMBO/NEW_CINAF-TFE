@@ -1,20 +1,41 @@
 "use client";
 
-// ============================================================
-// CINAF v2 — Modale de revue admin pour demandes de retrait
-// L'admin saisit une note optionnelle puis confirme l'action
-// (approve / reject).
-// ============================================================
+/**
+ * ============================================================
+ * CINAF v2 — Modale de revue administrative pour retraits (WithdrawalReviewModal)
+ * ============================================================
+ * Fenêtre de dialogue permettant aux administrateurs de statuer sur une demande
+ * de retrait d'œuvre formulée par un studio.
+ * 
+ * Deux actions possibles :
+ * - `approve` : Valide la dépublication. L'œuvre passe au statut `WITHDRAWN` et
+ *   n'est plus accessible aux utilisateurs finaux dans le catalogue.
+ * - `reject` : Refuse la demande de retrait. L'œuvre demeure `PUBLISHED`.
+ * - Note optionnelle : L'administrateur peut consigner un motif explicatif pour le producteur.
+ */
 
 import { useEffect, useState } from "react";
 
+/**
+ * Propriétés attendues par le composant `WithdrawalReviewModal`.
+ */
 interface WithdrawalReviewModalProps {
+  /** État d'ouverture de la modale */
   open: boolean;
+  /** Action sélectionnée par l'administrateur : approbation ou rejet */
   action: "approve" | "reject" | null;
+  /** Callback de fermeture sans validation */
   onClose: () => void;
+  /** Callback de confirmation exécutant l'action avec la note administrative */
   onConfirm: (reviewNote: string | undefined) => void | Promise<void>;
 }
 
+/**
+ * Modale de décision administrative sur les demandes de retrait d'œuvres.
+ * 
+ * @param props - Propriétés de la modale
+ * @returns La modale de révision avec zone de commentaire
+ */
 export default function WithdrawalReviewModal({
   open,
   action,
@@ -25,6 +46,7 @@ export default function WithdrawalReviewModal({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Réinitialisation des champs lors de chaque ouverture
   useEffect(() => {
     if (open) {
       setNote("");
@@ -37,6 +59,9 @@ export default function WithdrawalReviewModal({
 
   const isApprove = action === "approve";
 
+  /**
+   * Soumet la décision administrative et transmet la note optionnelle.
+   */
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setSubmitting(true);

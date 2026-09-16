@@ -25,6 +25,17 @@ interface StatTile {
   color: string;
 }
 
+/**
+ * Tableau de bord d'accueil de l'espace studio (/studio).
+ * 
+ * Fonctionnalités :
+ * - Charge les métadonnées du studio et ses statistiques agrégées via `studio.getMe`.
+ * - Récupère les 5 derniers films et 5 dernières séries pour un accès rapide.
+ * - Présente des tuiles récapitulatives (films publiés, brouillons, séries, abonnés, retraits).
+ * - Affiche une bannière d'information si le studio est encore en attente de première modération.
+ * 
+ * @returns Le tableau de bord du studio.
+ */
 export default function StudioDashboardPage() {
   const [me, setMe] = useState<StudioMeResponse | null>(null);
   const [films, setFilms] = useState<StudioFilm[]>([]);
@@ -254,6 +265,15 @@ interface DashboardListItem {
   editHref: string;
 }
 
+/**
+ * Composant de liste résumée pour les derniers films ou séries sur le tableau de bord studio.
+ * 
+ * @param props.title - Titre de la section (ex: "Derniers films").
+ * @param props.href - Lien pour voir l'ensemble des éléments.
+ * @param props.createHref - Lien direct pour initier une nouvelle création.
+ * @param props.items - Liste des éléments à lister.
+ * @param props.emptyLabel - Libellé alternatif si aucun élément n'existe.
+ */
 function DashboardList({
   title,
   href,

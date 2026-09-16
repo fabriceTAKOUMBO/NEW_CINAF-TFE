@@ -14,6 +14,17 @@ import { discover, type DiscoverWork } from "@/lib/api";
 import WorkDetailHero from "@/components/WorkDetailHero";
 import EpisodeList from "@/components/EpisodeList";
 
+/**
+ * Fiche détaillée d'un film.
+ * 
+ * Fonctionnalités :
+ * - Charge les métadonnées de l'œuvre via son slug depuis l'API `discover.get`.
+ * - Redirige vers `/series/[id]` si l'œuvre est identifiée comme une série.
+ * - Restitue la bannière héroïque cinématographique (`WorkDetailHero`) avec bouton direct "Regarder".
+ * - Affiche la liste des parties ou épisodes (`EpisodeList`) si le film est découpé en plusieurs segments.
+ * 
+ * @returns La vue détaillée du film.
+ */
 export default function FilmDetailPage() {
   const params = useParams();
   const slug = params.id as string;

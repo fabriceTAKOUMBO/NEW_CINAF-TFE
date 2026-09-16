@@ -1,24 +1,35 @@
-// ============================================================
-// CINAF v2 — Grille responsive de StudioCard
-// ============================================================
+/**
+ * ============================================================
+ * CINAF v2 — Grille responsive de studios (StudiosGrid)
+ * ============================================================
+ * Composant de présentation en grille adaptative pour les studios publics :
+ * - 2 colonnes sur smartphone (écrans compacts).
+ * - 3 colonnes sur tablette (écrans moyens).
+ * - 4 colonnes sur ordinateur (écrans larges).
+ * 
+ * Gestion de l'état :
+ * - Affiche un indicateur de chargement doré si `loading = true`.
+ * - Retourne `null` si le tableau est vide (laissant la responsabilité du message vide à la page parente).
+ */
 
 import type { StudioPublic } from "@/lib/api";
 import StudioCard from "./StudioCard";
 
+/**
+ * Propriétés attendues par le composant `StudiosGrid`.
+ */
 interface StudiosGridProps {
+  /** Liste des studios à afficher */
   studios: StudioPublic[];
-  /** Affiche un spinner doré centré à la place de la grille si `true`. */
+  /** Affiche un spinner doré centré à la place de la grille si true */
   loading?: boolean;
 }
 
 /**
- * Grille responsive de studios publics :
- *   - 2 colonnes sur mobile (xs)
- *   - 3 colonnes sur tablette (md)
- *   - 4 colonnes sur desktop (lg+)
- *
- * Si la liste est vide ET que `loading=false`, le composant ne rend rien :
- * la décision d'afficher un empty state appartient à la page parente.
+ * Grille responsive de cartes de studios.
+ * 
+ * @param props - Propriétés du composant
+ * @returns La grille Bootstrap de studios
  */
 export default function StudiosGrid({ studios, loading = false }: StudiosGridProps) {
   if (loading) {

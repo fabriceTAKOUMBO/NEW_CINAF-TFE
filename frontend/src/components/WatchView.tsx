@@ -1,9 +1,24 @@
 "use client";
 
-// ============================================================
-// CINAF v2 — Vue de lecture mutualisée pour /watch/film et /watch/episode.
-// Charge le détail depuis le catalogue Bunny et instancie HlsPlayer.
-// ============================================================
+/**
+ * ============================================================
+ * CINAF v2 — Vue de lecture vidéo mutualisée (WatchView)
+ * ============================================================
+ * Composant de visionnage principal partagé par les routes de lecture :
+ * - `/watch/film/[id]` : lecture de long-métrage
+ * - `/watch/episode/[id]` : lecture d'un épisode de série
+ * 
+ * Logique de contrôle d'accès et de navigation :
+ * 1. Authentification obligatoire : Redirige vers `/login?next=...` si l'utilisateur n'est pas connecté.
+ * 2. Vérification d'abonnement en temps réel :
+ *    Interroge l'endpoint backend `/catalogue/discover/{slug}/can-play` comme source unique de vérité,
+ *    évitant les états obsolètes de contexte utilisateur (ex: abonnement attribué manuellement par admin).
+ * 3. Paywall d'abonnement : Si `canPlay === false`, affiche un écran de blocage élégant incitant
+ *    à souscrire à un plan CINAF tout en offrant le retour à la fiche descriptive.
+ * 4. Détermination de l'épisode et de la saison courante : Gère les paramètres d'URL (`?s=` et `?ep=`)
+ *    et propose un bouton d'enchaînement automatique vers l'épisode suivant (`nextEpisode`).
+ * 5. Intégration du lecteur adaptatif `HlsPlayer` avec gestion du fallback MP4 progressif.
+ */
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -18,27 +33,38 @@ import {
 import { useAuth } from "@/lib/auth";
 import HlsPlayer from "./HlsPlayer";
 
+/**
+ * Propriétés attendues par le composant `WatchView`.
+ */
 interface WatchViewProps {
-  /** Slug de l'œuvre (Bunny). */
+  /** Slug unique de l'œuvre sur le catalogue Bunny/DB */
   slug: string;
-  /** Type attendu : "film" ou "episode". Sert au libellé "Retour" et navigation suivante. */
+  /** Contexte de visionnage : 'film' pour un film unique, 'episode' pour une série TV */
   context: "film" | "episode";
 }
 
+/**
+ * Page de lecture vidéo complète avec contrôle d'accès abonné et navigation d'épisodes.
+ * 
+ * @param props - Propriétés du composant (`slug`, `context`)
+ * @returns L'interface complète de visionnage ou l'écran de restriction d'abonnement
+ */
 export default function WatchView({ slug, context }: WatchViewProps) {
   const router = useRouter();
   const search = useSearchParams();
   const { isAuthenticated, isLoading: authLoading } = useAuth();
 
+  // Paramètres d'URL pour identifier la saison et l'épisode cible dans une série
   const seasonSlug = search.get("s") || "";
   const episodeSlug = search.get("ep") || "";
 
   const [work, setWork] = useState<DiscoverWork | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  /** null = check en cours, true/false = résultat du backend /can-play. */
+  /** null = vérification en cours, true/false = résultat du backend /can-play */
   const [canPlay, setCanPlay] = useState<boolean | null>(null);
 
+  // Redirection automatique vers /login si non authentifié une fois l'état d'auth chargé
   useEffect(() => {
     if (!authLoading && !isAuthenticated) {
       router.push(
@@ -49,15 +75,15 @@ export default function WatchView({ slug, context }: WatchViewProps) {
     }
   }, [authLoading, isAuthenticated, router, slug, context, episodeSlug, seasonSlug]);
 
+  // Chargement des données de l'œuvre et vérification des droits de lecture
   useEffect(() => {
     if (!isAuthenticated) return;
     let cancelled = false;
     setLoading(true);
     setCanPlay(null);
 
-    // 1. Récupère l'œuvre. 2. Vérifie l'abo via le backend (source de vérité,
-    //    évite le user du context qui peut être figé après assignation d'abo
-    //    par l'admin sans relogin).
+    // 1. Récupère l'œuvre. 2. Vérifie l'abonnement via le backend (source de vérité,
+    //    évite le user du context qui peut être figé après assignation d'abo par l'admin).
     Promise.all([
       discover.get(slug),
       subscriptions.canPlay(slug).catch(() => false),
@@ -81,6 +107,7 @@ export default function WatchView({ slug, context }: WatchViewProps) {
     };
   }, [slug, isAuthenticated]);
 
+  // Calcul mémorisé de la saison active, de l'épisode sélectionné et du prochain épisode
   const { season, episode, nextEpisode } = useMemo(() => {
     if (!work) return { season: null, episode: null, nextEpisode: null };
     const s: DiscoverSeason | undefined =
@@ -93,6 +120,7 @@ export default function WatchView({ slug, context }: WatchViewProps) {
     return { season: s, episode: ep, nextEpisode: next };
   }, [work, seasonSlug, episodeSlug]);
 
+  // Affichage de chargement pendant la vérification d'authentification ou d'accès
   if (authLoading || !isAuthenticated || loading) {
     return (
       <div className="watch-page d-flex align-items-center justify-content-center" style={{ minHeight: "60vh" }}>
@@ -101,6 +129,7 @@ export default function WatchView({ slug, context }: WatchViewProps) {
     );
   }
 
+  // Écran d'erreur si l'œuvre ou l'épisode n'a pas pu être chargé
   if (error || !work || !episode) {
     const backRoute = context === "film" ? `/films/${slug}` : `/series/${slug}`;
     return (
@@ -119,9 +148,7 @@ export default function WatchView({ slug, context }: WatchViewProps) {
     );
   }
 
-  // Restriction : seuls les abonnés actifs peuvent lire. Le catalogue reste public.
-  // On se base sur le résultat du backend /can-play (source de vérité), pas sur
-  // user.hasActiveSubscription du context React qui peut être figé.
+  // Écran de restriction Paywall : Seuls les abonnés avec souscription active peuvent visionner.
   if (canPlay === false) {
     const backRoute = work.kind === "serie" ? `/series/${slug}` : `/films/${slug}`;
     return (
@@ -160,6 +187,7 @@ export default function WatchView({ slug, context }: WatchViewProps) {
 
   return (
     <div className="watch-page">
+      {/* Barre supérieure avec bouton retour et rappel du titre de l'œuvre */}
       <div className="watch-topbar">
         <Link href={backRoute} className="watch-back">
           <i className="bi bi-arrow-left me-1" />
@@ -175,10 +203,12 @@ export default function WatchView({ slug, context }: WatchViewProps) {
         </span>
       </div>
 
+      {/* Zone du lecteur vidéo principal */}
       <div className="watch-layout">
         <div className="watch-player-col watch-player-col-full">
           <HlsPlayer src={episode.hlsUrl} fallbackMp4={episode.mp4Url} autoplay />
 
+          {/* Métadonnées de l'épisode et bouton d'enchaînement vers l'épisode suivant */}
           <div className="watch-meta">
             <h4 className="watch-meta-title">{episode.name.replace(/_/g, " ")}</h4>
             {!episode.hlsUrl && episode.mp4Url && (

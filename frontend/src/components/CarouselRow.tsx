@@ -1,29 +1,47 @@
 "use client";
 
-// ============================================================
-// CINAF v2 — Rangée de contenus défilable horizontalement.
-// Enveloppe générique (façon cinaf.tv) : en-tête (icône + titre +
-// badge + « Voir tout » + flèches) puis conteneur `.carousel-scroll`.
-// Agnostique du contenu : les enfants (WorkCard, StudioCard…) sont
-// passés via `children`, chacun dans son propre wrapper de largeur.
-// ============================================================
+/**
+ * ============================================================
+ * CINAF v2 — Rangée de contenus défilable (CarouselRow)
+ * ============================================================
+ * Enveloppe de carrousel horizontal générique s'inspirant de l'interface cinaf.tv.
+ * 
+ * Conception & Défilement :
+ * - En-tête : Titre de section avec icône, badge de comptage optionnel, lien "Voir tout"
+ *   et boutons de défilement manuel gauche/droite.
+ * - Défilement fluide : La fonction `scroll(direction)` calcule un déplacement de 80%
+ *   de la largeur visible pour une transition naturelle (`behavior: "smooth"`).
+ * - Agnostique : Reçoit n'importe quel type d'éléments enfants (`children`), tels que
+ *   `WorkCard` ou `StudioCard`.
+ */
 
 import { useRef, type ReactNode } from "react";
 import Link from "next/link";
 
+/**
+ * Propriétés attendues par le composant `CarouselRow`.
+ */
 interface CarouselRowProps {
+  /** Titre de la section de carrousel */
   title: string;
-  /** Icône Bootstrap Icons (ex. "bi-film"). */
+  /** Classe Bootstrap Icons optionnelle (ex: "bi-film") */
   icon?: string;
-  /** Compteur total affiché dans un badge doré à côté du titre. */
+  /** Nombre total d'éléments affiché dans un badge doré à côté du titre */
   badge?: number;
-  /** Destination du lien « Voir tout » (masqué si absent). */
+  /** URL de destination du lien « Voir tout » (si non renseigné, le lien est masqué) */
   viewAllHref?: string;
-  /** Libellé du lien « Voir tout ». */
+  /** Libellé du lien d'exploration complète (défaut: "Voir tout") */
   viewAllLabel?: string;
+  /** Éléments enfants à disposer dans le conteneur défilable */
   children: ReactNode;
 }
 
+/**
+ * Conteneur de carrousel horizontal avec navigation par flèches et en-tête complet.
+ * 
+ * @param props - Propriétés du carrousel
+ * @returns La section carrousel complète
+ */
 export default function CarouselRow({
   title,
   icon,
@@ -35,8 +53,9 @@ export default function CarouselRow({
   const scrollRef = useRef<HTMLDivElement>(null);
 
   /**
-   * Défilement horizontal fluide de 80 % de la largeur visible,
-   * dans la direction demandée (identique à ContentCarousel).
+   * Défilement horizontal fluide de 80 % de la largeur visible du conteneur.
+   * 
+   * @param direction - Direction du déplacement ("left" ou "right")
    */
   const scroll = (direction: "left" | "right") => {
     if (!scrollRef.current) return;
@@ -96,7 +115,7 @@ export default function CarouselRow({
         </div>
       </div>
 
-      {/* Conteneur défilable (scroll-snap géré par la classe CSS) */}
+      {/* Conteneur défilable horizontalement avec scroll-snap CSS */}
       <div className="carousel-scroll" ref={scrollRef}>
         {children}
       </div>

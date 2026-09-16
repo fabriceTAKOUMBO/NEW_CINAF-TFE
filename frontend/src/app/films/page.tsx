@@ -7,6 +7,12 @@
 import { Suspense } from "react";
 import WorksListView from "@/components/WorksListView";
 
+/**
+ * Page publique listant spécifiquement les longs métrages et films du catalogue CINAF.
+ * Délègue l'affichage et la pagination à `WorksListView` avec le filtre `kind="film"`.
+ * 
+ * @returns La page de navigation des films.
+ */
 export default function FilmsPage() {
   return (
     <Suspense
