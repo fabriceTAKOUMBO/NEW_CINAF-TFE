@@ -25,11 +25,17 @@ use PHPUnit\Framework\TestCase;
  *
  * En revanche `Film::studio`, `Serie::studio` sont nullable côté entité,
  * donc on peut tester ces deux cas LogicException.
+ *
+ * Test unitaire pur (TestCase, sans kernel ni base) :
+ * php bin/phpunit tests/Studio/Service/BunnyPathBuilderTest.php
  */
 final class BunnyPathBuilderTest extends TestCase
 {
     private BunnyPathBuilder $builder;
 
+    /**
+     * Nouveau BunnyPathBuilder pour chaque test (le service est sans état).
+     */
     protected function setUp(): void
     {
         $this->builder = new BunnyPathBuilder();
@@ -37,6 +43,9 @@ final class BunnyPathBuilderTest extends TestCase
 
     // ─── Construction de path — cas nominaux ─────────────────────
 
+    /**
+     * Affiche de film : `studios/{studio}/{film}/poster.jpg`.
+     */
     public function testForFilmBuildsExpectedPath(): void
     {
         $studio = $this->makeStudio('nollywood-studios');
@@ -47,6 +56,9 @@ final class BunnyPathBuilderTest extends TestCase
         $this->assertSame('studios/nollywood-studios/le-grand-film/poster.jpg', $path);
     }
 
+    /**
+     * Vidéo principale d'un film : `studios/{studio}/{film}/video.mp4`.
+     */
     public function testForFilmHandlesVideoMp4(): void
     {
         $studio = $this->makeStudio('cinaf-films');
@@ -58,6 +70,9 @@ final class BunnyPathBuilderTest extends TestCase
         );
     }
 
+    /**
+     * Affiche de série : `studios/{studio}/{serie}/poster.jpg`.
+     */
     public function testForSerieBuildsExpectedPath(): void
     {
         $studio = $this->makeStudio('canal-plus-afrique');
@@ -69,6 +84,10 @@ final class BunnyPathBuilderTest extends TestCase
         );
     }
 
+    /**
+     * Épisode 7 de la saison 1 : `saison-1/episode-07` (numéro d'épisode
+     * complété à deux chiffres).
+     */
     public function testForEpisodePadsEpisodeNumberToTwoDigits(): void
     {
         $studio = $this->makeStudio('studio-x');
@@ -82,6 +101,9 @@ final class BunnyPathBuilderTest extends TestCase
         );
     }
 
+    /**
+     * Un numéro d'épisode à deux chiffres reste inchangé : `saison-2/episode-15`.
+     */
     public function testForEpisodeKeepsDoubleDigitNumber(): void
     {
         $studio = $this->makeStudio('studio-x');
@@ -95,6 +117,10 @@ final class BunnyPathBuilderTest extends TestCase
         );
     }
 
+    /**
+     * Même contenu, même usage, même extension : même chemin, donc écrasement
+     * du fichier précédent.
+     */
     public function testDeterministicOverwrite(): void
     {
         // Deux constructions successives avec le même purpose donnent
@@ -110,6 +136,9 @@ final class BunnyPathBuilderTest extends TestCase
 
     // ─── LogicException : entité sans studio ─────────────────────
 
+    /**
+     * Film sans studio : LogicException.
+     */
     public function testForFilmWithoutStudioThrows(): void
     {
         $film = (new Film())->setSlug('orphan');
@@ -121,6 +150,9 @@ final class BunnyPathBuilderTest extends TestCase
         $this->builder->forFilm($film, 'video', 'mp4');
     }
 
+    /**
+     * Série sans studio : LogicException.
+     */
     public function testForSerieWithoutStudioThrows(): void
     {
         $serie = (new Serie())->setSlug('orphan');
@@ -131,6 +163,9 @@ final class BunnyPathBuilderTest extends TestCase
         $this->builder->forSerie($serie, 'poster', 'jpg');
     }
 
+    /**
+     * Épisode dont la série n'a pas de studio : LogicException.
+     */
     public function testForEpisodeWithoutStudioOnSerieThrows(): void
     {
         // Serie sans studio (le setter accepte null) → l'épisode hérite
@@ -147,6 +182,9 @@ final class BunnyPathBuilderTest extends TestCase
 
     // ─── Helpers ──────────────────────────────────────────────────
 
+    /**
+     * Studio minimal en mémoire (non persisté) portant le slug donné.
+     */
     private function makeStudio(string $slug): Studio
     {
         $studio = new Studio();

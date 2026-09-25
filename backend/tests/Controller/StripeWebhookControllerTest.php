@@ -14,9 +14,12 @@ use App\Tests\Support\ApiTestCase;
  *
  * La validation de signature et la sync DB sont couvertes par
  * StripeServiceTest et SubscriptionServiceStripeSyncTest.
+ *
+ * Lancement : `php bin/phpunit tests/Controller/StripeWebhookControllerTest.php`.
  */
 final class StripeWebhookControllerTest extends ApiTestCase
 {
+    /** POST sans JWT, signature factice, Stripe désactivé → 503 JSON (« … désactivé … »), pas de 401. */
     public function testReturns503WhenStripeDisabled(): void
     {
         $client = static::createClient();
@@ -33,6 +36,7 @@ final class StripeWebhookControllerTest extends ApiTestCase
         $this->assertStringContainsString('désactivé', $body['message']);
     }
 
+    /** GET sur l'URL du webhook → 405 : seule la méthode POST est routée. */
     public function testRouteAcceptsPostMethodOnly(): void
     {
         $client = static::createClient();

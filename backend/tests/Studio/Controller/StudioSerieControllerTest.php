@@ -20,11 +20,20 @@ use Symfony\Component\HttpFoundation\Response;
  * Important : `static::createClient()` DOIT être appelé avant tout accès
  * au container (sinon LogicException "Booting the kernel before calling
  * createClient()" — gotcha connu des tests Studio).
+ *
+ * Les séries, saisons et épisodes sont créés via l'API elle-même (helpers
+ * createSerieDraft() / createSeason()), avec un créateur de StudioTestTrait.
+ *
+ * Lancement : php bin/phpunit tests/Studio/Controller/StudioSerieControllerTest.php
  */
 class StudioSerieControllerTest extends ApiTestCase
 {
     use StudioTestTrait;
 
+    /**
+     * Crée une série DRAFT via POST /api/studio/series et renvoie son identifiant
+     * (le test échoue si la réponse n'est pas 201).
+     */
     private function createSerieDraft(KernelBrowser $client, string $token): string
     {
         $response = $this->postJson($client, '/api/studio/series', [
@@ -37,6 +46,10 @@ class StudioSerieControllerTest extends ApiTestCase
         return $body['id'];
     }
 
+    /**
+     * Ajoute la saison `$number` à la série via l'API et renvoie son identifiant
+     * (le test échoue si la réponse n'est pas 201).
+     */
     private function createSeason(KernelBrowser $client, string $serieId, string $token, int $number = 1): string
     {
         $response = $this->postJson(
@@ -51,6 +64,10 @@ class StudioSerieControllerTest extends ApiTestCase
 
     // ─── 409 unicité épisode ──────────────────────────────────────
 
+    /**
+     * Deux épisodes de même numéro dans une saison : le second reçoit 409
+     * (pré-contrôle du contrôleur), et non une erreur 500.
+     */
     public function testCreateEpisodeWithDuplicateNumberReturns409(): void
     {
         $client = static::createClient();
@@ -78,6 +95,9 @@ class StudioSerieControllerTest extends ApiTestCase
         $this->assertStringContainsString('existe déjà', $body['message']);
     }
 
+    /**
+     * Un numéro d'épisode inférieur à 1 est refusé : 400.
+     */
     public function testCreateEpisodeWithZeroNumberReturns400(): void
     {
         $client = static::createClient();
@@ -97,6 +117,10 @@ class StudioSerieControllerTest extends ApiTestCase
 
     // ─── Bug fix : GET serie doit inclure season.episodes ────────
 
+    /**
+     * Le détail d'une série expose `seasons[].episodes`, triés par numéro
+     * (non-régression du bug corrigé le 2026-05-13).
+     */
     public function testGetSerieIncludesEpisodesInSeasons(): void
     {
         $client = static::createClient();

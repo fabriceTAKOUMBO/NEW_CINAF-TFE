@@ -7,6 +7,13 @@ use Doctrine\Bundle\DoctrineBundle\Repository\ServiceEntityRepository;
 use Doctrine\Persistence\ManagerRegistry;
 
 /**
+ * Accès aux abonnements PAYANTS (Subscription) — à ne pas confondre avec
+ * StudioSubscriptionRepository (suivi gratuit d'un studio).
+ *
+ * Fournit l'abonnement courant d'un utilisateur (à l'unité ou par lot pour
+ * la liste admin) et la recherche par identifiant Stripe utilisée par les
+ * webhooks.
+ *
  * @extends ServiceEntityRepository<Subscription>
  */
 class SubscriptionRepository extends ServiceEntityRepository
@@ -17,20 +24,34 @@ class SubscriptionRepository extends ServiceEntityRepository
     }
 
     /**
-     * Retourne l'abonnement ACTIVE non expiré le plus récent pour un user, ou null.
-     * Un user n'est censé avoir qu'un seul abo ACTIVE à la fois (subscribe annule
-     * le précédent), mais en cas d'incohérence, on prend le plus récent.
+     * Abonnement local lié à l'abonnement Stripe `$stripeSubId` (`sub_...`), ou null.
+     *
+     * Clé de réconciliation des webhooks dans SubscriptionService :
+     * idempotence de `checkout.session.completed`, puis mise à jour par
+     * `customer.subscription.updated` / `customer.subscription.deleted`.
      */
     public function findOneByStripeSubscriptionId(string $stripeSubId): ?Subscription
     {
         return $this->findOneBy(['stripeSubscriptionId' => $stripeSubId]);
     }
 
+    /**
+     * Retourne l'abonnement ACTIVE non expiré le plus récent pour un user, ou null.
+     * Un user n'est censé avoir qu'un seul abo ACTIVE à la fois (subscribe annule
+     * le précédent), mais en cas d'incohérence, on prend le plus récent.
+     *
+     * « Non expiré » : `endsAt` nul ou dans le futur. Une résiliation différée
+     * (statut resté ACTIVE, `canceledAt` renseigné) reste donc l'abonnement
+     * courant jusqu'à `endsAt`. Appelée notamment par AuthController
+     * (/api/auth/me), SubscriptionController, AdminSubscriptionController et
+     * SubscriptionService.
+     */
     public function findCurrentActiveForUser(User $user): ?Subscription
     {
         return $this->createQueryBuilder('s')
             ->andWhere('s.user = :user')
             ->andWhere('s.status = :active')
+            // OR mis entre parenthèses par andWhere() : combiné en ET avec le reste.
             ->andWhere('s.endsAt IS NULL OR s.endsAt > :now')
             ->setParameter('user', $user)
             ->setParameter('active', Subscription::STATUS_ACTIVE)
@@ -54,6 +75,8 @@ class SubscriptionRepository extends ServiceEntityRepository
             return [];
         }
 
+        // Fetch join : plan et utilisateur sont hydratés avec l'abonnement, ce
+        // qui évite une requête par ligne quand la liste admin lit le nom du plan.
         $rows = $this->createQueryBuilder('s')
             ->select('s', 'p', 'u')
             ->join('s.plan', 'p')

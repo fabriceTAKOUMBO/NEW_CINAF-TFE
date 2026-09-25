@@ -15,10 +15,18 @@ use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
  * Lance systématiquement AccessDeniedHttpException (403) en cas d'échec —
  * ne distingue PAS volontairement "studio inactif" et "non-propriétaire"
  * pour ne pas divulguer l'existence d'un studio à un tiers.
+ *
+ * Utilisé par les contrôleurs de l'espace studio (films, séries, upload,
+ * profil /me) : c'est le garde-fou qui empêche un studio d'agir sur les
+ * contenus ou les dossiers Bunny d'un autre studio.
  */
 class StudioOwnershipChecker
 {
     /**
+     * Vérifie que l'utilisateur est le propriétaire du studio et que ce studio
+     * est actif. Les identifiants sont comparés sous forme de chaîne RFC 4122
+     * (deux objets Uuid distincts pour une même valeur restent égaux).
+     *
      * @throws AccessDeniedHttpException
      */
     public function assertOwns(Studio $studio, User $user): void
@@ -46,6 +54,9 @@ class StudioOwnershipChecker
     }
 
     /**
+     * Vérifie que le film appartient à un studio actif possédé par l'utilisateur.
+     * Un film sans studio est refusé avec le même message que les autres cas.
+     *
      * @throws AccessDeniedHttpException
      */
     public function assertOwnsFilm(Film $film, User $user): void
@@ -58,6 +69,9 @@ class StudioOwnershipChecker
     }
 
     /**
+     * Vérifie que la série appartient à un studio actif possédé par l'utilisateur.
+     * Saisons et épisodes n'ont pas de contrôle propre : on vérifie leur série.
+     *
      * @throws AccessDeniedHttpException
      */
     public function assertOwnsSerie(Serie $serie, User $user): void
@@ -93,6 +107,9 @@ class StudioOwnershipChecker
      * (ex: `12_CAS/CAS_1/CAS1_E01`). Pour ces contenus, le PATCH du champ
      * `bunnyVideoId` est interdit côté producteur (l'admin peut le faire
      * via /api/admin/films/{id} sans cette contrainte).
+     *
+     * @return bool false pour un chemin vide ou null (aucun chemin encore
+     *              associé : le studio peut alors en définir un)
      */
     public function isImportedBunnyPath(?string $path): bool
     {

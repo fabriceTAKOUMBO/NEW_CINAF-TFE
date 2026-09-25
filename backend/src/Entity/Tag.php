@@ -7,6 +7,15 @@ use Doctrine\Common\Collections\Collection;
 use Doctrine\ORM\Mapping as ORM;
 use Symfony\Component\Uid\Uuid;
 
+/**
+ * Étiquette éditoriale (nom et slug uniques) rattachable aux films et séries.
+ *
+ * Particularité : Tag est le côté PROPRIÉTAIRE des relations `film_tag` et
+ * `serie_tag` (Film::$tags et Serie::$tags en sont les côtés inverses) ;
+ * c'est donc depuis Tag qu'un lien doit être créé pour être persisté.
+ * Aucun endpoint, fixture ni requête n'utilise les tags dans le code actuel,
+ * et Film/Serie::toArray() ne les exposent pas.
+ */
 #[ORM\Entity(repositoryClass: TagRepository::class)]
 #[ORM\Table(name: 'tag')]
 class Tag
@@ -21,10 +30,12 @@ class Tag
     #[ORM\Column(length: 120, unique: true)]
     private string $slug;
 
+    /** Côté propriétaire (table de jointure `film_tag`). */
     #[ORM\ManyToMany(targetEntity: Film::class, inversedBy: 'tags')]
     #[ORM\JoinTable(name: 'film_tag')]
     private Collection $films;
 
+    /** Côté propriétaire (table de jointure `serie_tag`). */
     #[ORM\ManyToMany(targetEntity: Serie::class, inversedBy: 'tags')]
     #[ORM\JoinTable(name: 'serie_tag')]
     private Collection $series;
@@ -44,6 +55,11 @@ class Tag
     public function getFilms(): Collection { return $this->films; }
     public function getSeries(): Collection { return $this->series; }
 
+    /**
+     * Sérialise le tag : id, name, slug.
+     *
+     * @return array<string, mixed>
+     */
     public function toArray(): array
     {
         return [

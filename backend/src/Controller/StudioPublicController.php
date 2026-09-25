@@ -29,7 +29,22 @@ use Symfony\Component\Security\Http\Attribute\IsGranted;
  *
  * Toutes les routes sont en accès libre (PUBLIC_ACCESS dans security.yaml,
  * positionné AVANT la règle `^/api/studio → ROLE_CREATEUR` pour ne pas être
- * masqué par cette dernière).
+ * masqué par cette dernière). Exception : les trois routes d'abonnement
+ * (`subscribe`, `subscription`) exigent en plus un utilisateur connecté via
+ * `#[IsGranted('IS_AUTHENTICATED_FULLY')]`.
+ *
+ * Endpoints (préfixe `/api/studios`) :
+ *  - GET    `/`                   : liste paginée des studios publics (Hydra) ;
+ *  - GET    `/search?q=`          : recherche par nom (20 résultats max) ;
+ *  - GET    `/{slug}`             : fiche publique d'un studio ;
+ *  - GET    `/{slug}/works`       : ses films et séries publiés (Hydra, `?kind=`) ;
+ *  - POST   `/{slug}/subscribe`   : suivre le studio (connecté) ;
+ *  - DELETE `/{slug}/subscribe`   : ne plus le suivre (connecté) ;
+ *  - GET    `/{slug}/subscription`: suis-je abonné ? (connecté).
+ *
+ * « S'abonner » à un studio (entité `StudioSubscription`) est un suivi
+ * GRATUIT, façon YouTube : rien à voir avec l'abonnement payant
+ * (`Subscription`) qui donne accès à la lecture des vidéos.
  */
 #[Route('/api/studios')]
 class StudioPublicController extends AbstractController
@@ -46,6 +61,11 @@ class StudioPublicController extends AbstractController
     /**
      * Liste paginée des studios publics, triés par nom alphabétique ascendant.
      * Réponse format Hydra (cohérent avec le reste du catalogue public).
+     *
+     * Paramètres : `page` (défaut 1) et `itemsPerPage` (défaut 30, borné entre 1 et 100).
+     *
+     * @return JsonResponse 200 `{"hydra:member": [studio public + compteurs], "hydra:totalItems": int}`,
+     *                      avec cache public de 60 s.
      */
     #[Route('', name: 'studios_public_list', methods: ['GET'])]
     public function list(Request $request): JsonResponse
@@ -80,6 +100,11 @@ class StudioPublicController extends AbstractController
      *
      * Min 2 caractères côté serveur : sous ce seuil on renvoie `[]` pour
      * éviter des requêtes inutiles aux multiples résultats.
+     *
+     * Cette route est déclarée AVANT `/{slug}` : sans cet ordre, « search »
+     * serait interprété comme le slug d'un studio.
+     *
+     * @return JsonResponse 200 avec une liste de studios publics (éventuellement vide).
      */
     #[Route('/search', name: 'studios_public_search', methods: ['GET'])]
     public function search(Request $request): JsonResponse
@@ -118,6 +143,10 @@ class StudioPublicController extends AbstractController
      * n'existe pas OU s'il ne satisfait pas les critères de visibilité
      * publique. Le filtrage est volontaire pour ne pas leaker l'existence
      * de studios inactifs / non validés / sans contenu publié.
+     *
+     * @return JsonResponse 200 avec le studio public (sans `ownerId`) et ses compteurs
+     *                      `publishedFilmsCount`, `publishedSeriesCount`, `subscribersCount` ;
+     *                      404 `{error}` sinon.
      */
     #[Route('/{slug}', name: 'studios_public_get', methods: ['GET'])]
     public function get(string $slug): JsonResponse
@@ -141,6 +170,11 @@ class StudioPublicController extends AbstractController
      * Le paramètre `?kind=` permet de filtrer (film / serie / all). Quand
      * `kind=all` on assemble les deux listes en PHP puis on trie/coupe ;
      * acceptable au volume MVP (catalogue d'un studio < 200 œuvres).
+     * Une valeur de `kind` inconnue vaut `all`. Pagination : `page` et
+     * `itemsPerPage` (défaut 30, borné entre 1 et 100).
+     *
+     * @return JsonResponse 200 `{"hydra:member": [{id, slug, title, kind, poster, year, createdAt}],
+     *                      "hydra:totalItems": int}` ; 404 `{error}` si le studio n'est pas public.
      */
     #[Route('/{slug}/works', name: 'studios_public_works', methods: ['GET'])]
     public function works(string $slug, Request $request): JsonResponse
@@ -161,6 +195,8 @@ class StudioPublicController extends AbstractController
         // Note : findByStudioPaginated retourne ['data' => Entity[], 'total' => int, ...]
         // d'où l'extraction explicite de la clé 'data' (annotations @var ci-dessous
         // pour aider l'analyseur statique à narrower le type union de l'array shape).
+        // Chaque type est chargé en une seule page de 500 œuvres au plus : au-delà,
+        // les plus anciennes ne seraient pas listées.
         $rawWorks = [];
         if ($kind === 'film' || $kind === 'all') {
             $filmsPage = $this->filmRepo->findByStudioPaginated($studio, Film::STATUS_PUBLISHED, 1, 500);
@@ -180,6 +216,9 @@ class StudioPublicController extends AbstractController
         }
 
         // Étape 2 — tri unifié par date de création desc + pagination en mémoire.
+        // Comparaison de chaînes ATOM (AAAA-MM-JJTHH:MM:SS+HH:MM) : l'ordre
+        // alphabétique suit l'ordre chronologique tant que les dates partagent
+        // le même fuseau.
         usort($rawWorks, fn (array $a, array $b) => strcmp($b['createdAt'], $a['createdAt']));
         $total = \count($rawWorks);
         $slice = array_slice($rawWorks, ($page - 1) * $limit, $limit);
@@ -204,6 +243,8 @@ class StudioPublicController extends AbstractController
      * 401 géré automatiquement par l'attribut `#[IsGranted]`.
      *
      * Body retourné : `{isSubscribed: true, subscribersCount: int}`.
+     * Codes : 201 à la création, 200 si l'utilisateur suivait déjà le studio.
+     * Suivi gratuit, sans lien avec l'abonnement payant (`Subscription`).
      */
     #[Route('/{slug}/subscribe', name: 'studios_public_subscribe', methods: ['POST'])]
     #[IsGranted('IS_AUTHENTICATED_FULLY')]
@@ -305,6 +346,7 @@ class StudioPublicController extends AbstractController
 
     /**
      * Sérialise un Film vers le DTO « Work » consommé par le frontend.
+     * `createdAt` (format ATOM) sert au tri de works().
      */
     private function mapFilmToWork(Film $film): array
     {
@@ -320,9 +362,9 @@ class StudioPublicController extends AbstractController
     }
 
     /**
-     * Sérialise une Serie vers le DTO « Work ». Les séries n'ont pas de
-     * champ `year` strict (la donnée peut être absente), on renvoie null
-     * dans ce cas.
+     * Sérialise une Serie vers le DTO « Work ». `year` est renvoyé tel quel :
+     * c'est un entier jamais null ; les œuvres importées depuis Bunny portent
+     * la valeur 0 (placeholder de l'import), comme les films.
      */
     private function mapSerieToWork(Serie $serie): array
     {

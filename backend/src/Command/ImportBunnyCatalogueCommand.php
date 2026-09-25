@@ -21,23 +21,37 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 use Symfony\Component\String\Slugger\AsciiSlugger;
 
 /**
- * Phase F — Import du catalogue Bunny (96 œuvres) vers la base de données.
+ * Phase F — Import du catalogue Bunny vers la base de données (96 œuvres lors
+ * de la Phase F ; 185 depuis la séparation films / séries du 2026-08-21).
  *
  * Pré-requis :
  *  - 10 studios actifs en DB (chargés via `doctrine:fixtures:load`).
  *  - AccessKey Bunny configurée pour la zone `cinaftv-movies` (.env.local).
  *
  * Logique :
- *  - Parcourt l'arborescence Bunny via {@see BunnyCatalogueService::listAllWorks()}.
- *  - Pour chaque œuvre : détecte film vs série, attribue un studio de manière
+ *  - Parcourt l'arborescence Bunny via {@see BunnyCatalogueService::listAllWorks()},
+ *    qui fournit la classification film / série, les parties et la bande-annonce.
+ *  - Pour chaque œuvre : attribue un studio de manière
  *    déterministe (`crc32($slug) % 10` → index dans la liste triée par slug).
- *  - Idempotent : skip si un Film/Serie existe déjà avec le même `bunnyVideoId`
- *    (= path Bunny racine, ex: "12_CAS" ou "A_bientot").
+ *  - Idempotent : skip si un Film/Serie existe déjà avec le même `bunnyFolder`
+ *    (= dossier Bunny racine de l'œuvre, ex: "12_CAS" ou "FILMS/CLEOPATRA").
  *  - Slugs déduplication : suffixe `-2`, `-3`, etc. en cas de collision.
+ *  - Pour les films, crée une FilmPart par vidéo jouable ; la bande-annonce
+ *    va dans `trailerVideoId`. Un film sans aucune vidéo jouable n'est pas créé.
  *  - Pour les séries, crée Season + Episode descendants.
  *  - Pas de poster / synopsis détaillé / durée — placeholders uniquement.
+ *  - Les œuvres sont créées directement en statut PUBLISHED.
+ *
+ * Options : `--dry-run` (simulation, aucune écriture) et `--purge` (supprime
+ * d'abord les œuvres d'un import précédent ; le contenu des studios n'est
+ * jamais touché).
  *
  * Sortie : compteurs (créés / skipped / errors) + liste détaillée si --dry-run.
+ * S'y ajoutent le nombre de dossiers sans vidéo et la liste des films en
+ * plusieurs parties. Code de sortie FAILURE si un pré-requis manque ou si une
+ * œuvre a échoué (hors dry-run).
+ *
+ * Exemple : `php bin/console app:catalogue:import-bunny --dry-run`.
  */
 #[AsCommand(
     name: 'app:catalogue:import-bunny',
@@ -45,7 +59,13 @@ use Symfony\Component\String\Slugger\AsciiSlugger;
 )]
 class ImportBunnyCatalogueCommand extends Command
 {
+    /** Nombre de studios entre lesquels les œuvres importées sont réparties. */
     private const REQUIRED_STUDIOS = 10;
+    /**
+     * Synopsis provisoire des œuvres importées. Doit rester identique à
+     * CatalogueDiscoverController::IMPORT_PLACEHOLDER_SYNOPSIS, qui le masque
+     * sur la fiche publique.
+     */
     private const PLACEHOLDER_SYNOPSIS = 'Importé depuis le catalogue Bunny CINAF.';
 
     public function __construct(
@@ -75,12 +95,23 @@ class ImportBunnyCatalogueCommand extends Command
         );
     }
 
+    /**
+     * Déroule l'import : contrôle des studios, purge éventuelle, listing
+     * Bunny, création des œuvres puis rapport.
+     *
+     * Toutes les créations sont écrites en base par un seul flush final ; une
+     * œuvre en erreur est comptée et n'interrompt pas les suivantes.
+     *
+     * @return int Command::SUCCESS, ou Command::FAILURE (studios manquants,
+     *             erreur inattendue au listing, ou au moins une œuvre en erreur hors dry-run).
+     */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $io = new SymfonyStyle($input, $output);
         $dryRun = (bool) $input->getOption('dry-run');
         $purge = (bool) $input->getOption('purge');
 
+        // Studios actifs triés par slug : l'ordre fixe l'index visé par crc32($slug) % 10.
         $studios = $this->studioRepo->findActiveOrdered();
         if (count($studios) < self::REQUIRED_STUDIOS) {
             $io->error(sprintf(
@@ -101,6 +132,8 @@ class ImportBunnyCatalogueCommand extends Command
             $this->purgeImported($io, $dryRun);
         }
 
+        // listAllWorks() absorbe lui-même les erreurs de listing Bunny (résultat
+        // partiel, voire vide) : ce catch ne couvre que les erreurs inattendues.
         try {
             $works = $this->catalogue->listAllWorks();
         } catch (\Throwable $e) {
@@ -117,8 +150,11 @@ class ImportBunnyCatalogueCommand extends Command
         $multiPart = [];
         $errors = [];
         $details = [];
+        // Slugs déjà pris en base, films ET séries confondus : la fiche publique
+        // cherche une œuvre par slug sans savoir s'il s'agit d'un film ou d'une série.
         $usedSlugs = $this->loadExistingSlugs();
 
+        // Une erreur sur une œuvre est consignée et n'interrompt pas les suivantes.
         foreach ($works as $work) {
             try {
                 $result = $this->processWork($work, $studios, $usedSlugs, $dryRun);
@@ -154,6 +190,7 @@ class ImportBunnyCatalogueCommand extends Command
                 ));
             }
         } else {
+            // Flush unique : toutes les entités persistées par processWork() sont écrites ici.
             $this->em->flush();
         }
 
@@ -202,6 +239,10 @@ class ImportBunnyCatalogueCommand extends Command
 
     /**
      * Traite une œuvre Bunny : skip si déjà importée, sinon crée Film ou Serie.
+     *
+     * Actions renvoyées : `skip` (dossier déjà importé), `empty` (film sans
+     * vidéo jouable, signalé mais non créé) ou `create`. En dry-run, le slug
+     * et le studio sont calculés mais rien n'est persisté.
      *
      * @param array{slug:string,title:string,kind:string,path:string,trailerPath:?string,parts:list<array<string,mixed>>,seasons:list<array<string,mixed>>} $work
      * @param list<Studio>                                                                                                                                 $studios
@@ -255,6 +296,8 @@ class ImportBunnyCatalogueCommand extends Command
         $usedSlugs[$slug] = true;
 
         // Studio attribution déterministe : crc32($slug) % 10.
+        // Un même slug retombe toujours sur le même studio ; abs() protège d'un
+        // crc32() négatif sur une plateforme 32 bits.
         $studioIdx = abs(crc32($slug)) % count($studios);
         $studio = $studios[$studioIdx];
 
@@ -290,6 +333,9 @@ class ImportBunnyCatalogueCommand extends Command
      */
     private function purgeImported(SymfonyStyle $io, bool $dryRun): void
     {
+        // Critère « importé » : `bunnyFolder` renseigné, ou (lignes antérieures à
+        // ce champ) `bunnyVideoId` du film / `trailerVideoId` de la série hors du
+        // préfixe `studios/` réservé aux uploads des studios.
         $films = $this->filmRepo->createQueryBuilder('f')
             ->where('f.bunnyFolder IS NOT NULL')
             ->orWhere('(f.bunnyVideoId IS NOT NULL AND f.bunnyVideoId NOT LIKE :studio)')
@@ -321,11 +367,24 @@ class ImportBunnyCatalogueCommand extends Command
         foreach ($series as $serie) {
             $this->em->remove($serie);
         }
+        // Flush immédiat, distinct de celui de l'import : la purge est écrite
+        // avant même que le catalogue Bunny soit listé.
         $this->em->flush();
         $io->writeln('  → purge effectuée.');
         $io->newLine();
     }
 
+    /**
+     * Crée un Film publié, rattaché au studio attribué, et une FilmPart par
+     * vidéo jouable (numérotées 1..N dans l'ordre de `parts`).
+     *
+     * `bunnyFolder` reçoit le dossier de l'œuvre (clé d'idempotence),
+     * `bunnyVideoId` le chemin de la 1re partie et `trailerVideoId` celui de
+     * la bande-annonce (ou null). Les entités sont seulement persistées : le
+     * flush est fait par execute().
+     *
+     * @param array<string, mixed> $work Œuvre de type film issue de listAllWorks(), avec au moins une partie.
+     */
     private function createFilm(array $work, string $slug, Studio $studio): Film
     {
         $parts = $work['parts'];
@@ -363,6 +422,19 @@ class ImportBunnyCatalogueCommand extends Command
         return $film;
     }
 
+    /**
+     * Crée une Serie publiée, rattachée au studio attribué, avec ses saisons
+     * et ses épisodes.
+     *
+     * Saisons et épisodes sont numérotés 1..N dans l'ordre fourni par
+     * listAllWorks() (ordre naturel des noms de dossiers, pas forcément le
+     * numéro réel de l'épisode). Une saison prend le nom de son dossier Bunny
+     * (ou « Saison 1 » / « Épisodes hors saison » pour les épisodes à plat),
+     * un épisode le nom du sien ; `bunnyVideoId` d'un épisode est le chemin de
+     * ce dossier. Persistance seule, le flush est fait par execute().
+     *
+     * @param array<string, mixed> $work Œuvre de type série issue de listAllWorks().
+     */
     private function createSerie(array $work, string $slug, Studio $studio): Serie
     {
         $serie = new Serie();
@@ -432,6 +504,13 @@ class ImportBunnyCatalogueCommand extends Command
         return $slugs;
     }
 
+    /**
+     * Renvoie un slug libre : le slug de base nettoyé, ou suffixé `-2`, `-3`…
+     * s'il est déjà pris. N'enregistre pas le résultat dans `$usedSlugs`
+     * (c'est à l'appelant de le faire).
+     *
+     * @param array<string, bool> $usedSlugs Slugs déjà utilisés (clés).
+     */
     private function dedupeSlug(string $base, array $usedSlugs): string
     {
         // On re-slugifie via AsciiSlugger pour cohérence (le service Bunny

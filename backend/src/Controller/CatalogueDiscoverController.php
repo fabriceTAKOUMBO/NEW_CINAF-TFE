@@ -22,12 +22,27 @@ use Symfony\Component\Security\Http\Attribute\IsGranted;
  *
  * Phase F (Agent 5) — Feature flag `CATALOGUE_SOURCE` :
  *  - `bunny` (default, rollback safe) : alimenté depuis la Storage Zone Bunny
- *    `cinaftv-movies` via {@see BunnyCatalogueService} (96 œuvres, HLS adaptatif).
+ *    `cinaftv-movies` via {@see BunnyCatalogueService} (96 œuvres lors de la
+ *    Phase F, HLS adaptatif).
  *  - `db` : alimenté depuis les entités Film/Serie publiées (status='PUBLISHED').
  *
- * Quel que soit la source, le contrat JSON est identique pour le frontend
+ * Quelle que soit la source, le contrat JSON est identique pour le frontend
  * (DiscoverWorkSummary / DiscoverWork) afin de ne pas casser le module
- * `discover` côté client.
+ * `discover` côté client. La source `db` y ajoute des champs facultatifs
+ * (affiche, studio, synopsis, année, genres, bande-annonce…) que la source
+ * `bunny` ne connaît pas.
+ *
+ * Préfixe `/api/catalogue/discover`, accès public (aucune règle
+ * access_control), sauf `can-play` qui exige un utilisateur connecté :
+ *  - GET `/`               : liste paginée (`q`, `kind`, `page`, `limit`) ;
+ *  - GET `/{slug}`         : fiche d'une œuvre avec saisons, épisodes et URL HLS ;
+ *  - GET `/{slug}/can-play`: droit de lecture (abonnement payant actif), ROLE_USER.
+ *
+ * En source `db`, seules les œuvres PUBLISHED sont exposées (la source
+ * `bunny` expose tout le contenu de la zone) ; la fiche d'une œuvre retirée
+ * (WITHDRAWN) répond 410 pour que le front affiche une page « contenu
+ * retiré ». `can-play` se contente de répondre oui / non : les URL HLS de la
+ * fiche sont renvoyées à tout visiteur.
  */
 #[Route('/api/catalogue/discover')]
 class CatalogueDiscoverController extends AbstractController
@@ -45,6 +60,12 @@ class CatalogueDiscoverController extends AbstractController
      */
     private const IMPORT_PLACEHOLDER_SYNOPSIS = 'Importé depuis le catalogue Bunny CINAF.';
 
+    /**
+     * @param string $catalogueSource Valeur de `CATALOGUE_SOURCE` (`bunny` ou `db`), injectée par
+     *                                `config/services.yaml` ; toute autre valeur se comporte comme `bunny`.
+     * @param string $catalogueZone   Zone Bunny des vidéos du catalogue, utilisée pour construire les URL HLS
+     *                                en source `db`.
+     */
     public function __construct(
         private readonly BunnyCatalogueService $catalogue,
         private readonly SubscriptionService $subService,
@@ -55,6 +76,17 @@ class CatalogueDiscoverController extends AbstractController
         private readonly string $catalogueZone = 'cinaftv-movies',
     ) {}
 
+    /**
+     * Liste paginée des œuvres du catalogue « Découvrir ».
+     *
+     * Paramètres de requête : `q` (recherche dans le titre), `kind` (`film` ou
+     * `serie`, toute autre valeur est ignorée), `page` (défaut 1) et `limit`
+     * (défaut 30, borné entre 1 et 100).
+     *
+     * @return JsonResponse 200 `{data: [{slug, title, kind, poster?}], total, page, limit}`
+     *                      (cache public 60 s) ; 502 `{message, detail}` si Bunny est
+     *                      indisponible (source `bunny` uniquement).
+     */
     #[Route('', methods: ['GET'])]
     public function list(Request $request): JsonResponse
     {
@@ -65,6 +97,7 @@ class CatalogueDiscoverController extends AbstractController
 
         $kindFilter = in_array($kind, ['film', 'serie'], true) ? $kind : null;
 
+        // Source db : mêmes bornes que listWorks() (page ≥ 1, 1 ≤ limit ≤ 100).
         if ($this->catalogueSource === self::SOURCE_DB) {
             return $this->publicCache($this->json($this->listFromDb(
                 $q !== null ? (string) $q : null,
@@ -74,6 +107,7 @@ class CatalogueDiscoverController extends AbstractController
             )));
         }
 
+        // Source bunny : page et limit sont bornées par listWorks() lui-même.
         try {
             $result = $this->catalogue->listWorks(
                 $q !== null ? (string) $q : null,
@@ -82,6 +116,7 @@ class CatalogueDiscoverController extends AbstractController
                 $limit,
             );
         } catch (\RuntimeException $e) {
+            // Pas de cache public sur une erreur : le prochain appel retentera Bunny.
             return $this->json([
                 'message' => 'Catalogue Bunny indisponible.',
                 'detail'  => $e->getMessage(),
@@ -110,6 +145,13 @@ class CatalogueDiscoverController extends AbstractController
      * - 204 No Content si abo actif
      * - 403 Forbidden si pas d'abo actif (avec message)
      * - 404 si l'œuvre n'existe pas
+     * - 502 si le catalogue Bunny est injoignable (source `bunny`)
+     * - 401 sans jeton JWT valide (#[IsGranted('ROLE_USER')])
+     *
+     * L'existence de l'œuvre est testée AVANT l'abonnement. Le 403 porte
+     * `reason: "no_subscription"` pour que le client distingue ce cas.
+     * « Abonnement actif » = abonnement payant (`Subscription`), pas le suivi
+     * gratuit d'un studio.
      */
     #[Route('/{slug}/can-play', methods: ['GET'], requirements: ['slug' => '[a-z0-9-]+'])]
     #[IsGranted('ROLE_USER')]
@@ -138,12 +180,37 @@ class CatalogueDiscoverController extends AbstractController
         return $this->json(null, 204);
     }
 
+    /**
+     * Fiche publique d'une œuvre : métadonnées, saisons et épisodes avec URL
+     * de lecture HLS. En source `db`, un film est présenté comme une œuvre à
+     * une seule saison (`principale`) dont les épisodes sont ses parties.
+     *
+     * @return JsonResponse 200 avec l'œuvre (cache public 60 s) ; 410 `{message, status,
+     *                      kind, title}` si l'œuvre a été retirée de la plateforme
+     *                      (source `db`) ; 404 `{message}` si le slug est inconnu ou si
+     *                      l'œuvre n'a jamais été publiée ; 502 `{message, detail}` si
+     *                      Bunny est indisponible (source `bunny`).
+     */
     #[Route('/{slug}', methods: ['GET'], requirements: ['slug' => '[a-z0-9-]+'])]
     public function detail(string $slug): JsonResponse
     {
         if ($this->catalogueSource === self::SOURCE_DB) {
             $work = $this->detailFromDb($slug);
             if ($work === null) {
+                // Œuvre retirée (WITHDRAWN) : 410 Gone plutôt que 404, pour que le
+                // front affiche une page « contenu retiré » à qui suit un ancien lien.
+                // Elle a été publique : révéler son titre ne divulgue rien. Un
+                // brouillon ou un contenu en attente d'approbation, jamais public,
+                // reste en 404 : son existence ne doit pas transparaître.
+                $withdrawn = $this->findWithdrawn($slug);
+                if ($withdrawn !== null) {
+                    return $this->json([
+                        'message' => "Œuvre '$slug' retirée de la plateforme.",
+                        'status' => 'WITHDRAWN',
+                        'kind' => $withdrawn['kind'],
+                        'title' => $withdrawn['title'],
+                    ], 410);
+                }
                 return $this->json(['message' => "Œuvre '$slug' introuvable."], 404);
             }
             return $this->publicCache($this->json($work));
@@ -170,6 +237,14 @@ class CatalogueDiscoverController extends AbstractController
     // -----------------------------------------------------------------------
 
     /**
+     * Liste « Découvrir » en source `db` : films et séries au statut
+     * PUBLISHED, filtrés par titre et par type.
+     *
+     * Sans filtre de type, les deux requêtes sont paginées séparément (tri par
+     * date de création décroissante) puis fusionnées : une page peut donc
+     * contenir jusqu'à `limit` films ET `limit` séries, et le tri alphabétique
+     * final ne vaut qu'à l'intérieur de la page. `total` = films + séries.
+     *
      * @return array{data: list<array{slug:string,title:string,kind:string}>, total:int, page:int, limit:int}
      */
     private function listFromDb(?string $q, ?string $kindFilter, int $page, int $limit): array
@@ -231,6 +306,9 @@ class CatalogueDiscoverController extends AbstractController
     }
 
     /**
+     * Fiche en source `db` : cherche un film PUBLISHED portant ce slug, puis
+     * une série. À slug identique, le film l'emporte.
+     *
      * @return array{slug:string,title:string,kind:string,seasons:list<array{slug:string,name:string,episodes:list<array{slug:string,name:string,hlsUrl:?string,mp4Url:?string}>}>}|null
      */
     private function detailFromDb(string $slug): ?array
@@ -247,8 +325,32 @@ class CatalogueDiscoverController extends AbstractController
     }
 
     /**
+     * Œuvre retirée de la plateforme (WITHDRAWN) portant ce slug, pour la
+     * réponse 410 de la fiche publique. À slug identique, le film l'emporte,
+     * comme dans detailFromDb().
+     *
+     * @return array{kind: string, title: string}|null null si aucune œuvre retirée
+     */
+    private function findWithdrawn(string $slug): ?array
+    {
+        $film = $this->filmRepo->findOneBy(['slug' => $slug, 'status' => Film::STATUS_WITHDRAWN]);
+        if ($film !== null) {
+            return ['kind' => 'film', 'title' => $film->getTitle()];
+        }
+        $serie = $this->serieRepo->findOneBy(['slug' => $slug, 'status' => Serie::STATUS_WITHDRAWN]);
+        if ($serie !== null) {
+            return ['kind' => 'serie', 'title' => $serie->getTitle()];
+        }
+        return null;
+    }
+
+    /**
      * Indique si une œuvre existe (pour can-play).
      * Retourne true / false / null (null = erreur infra Bunny).
+     *
+     * Mêmes règles que la fiche : en source `db`, une œuvre non publiée est
+     * considérée comme inexistante ; en source `bunny`, le détail complet est
+     * construit (et mis en cache) par getWork().
      */
     private function workExists(string $slug): ?bool
     {
@@ -268,6 +370,11 @@ class CatalogueDiscoverController extends AbstractController
         }
     }
 
+    /**
+     * Convertit un Film publié au format DiscoverWork : une saison unique
+     * `principale` dont les épisodes sont les parties du film, plus les
+     * métadonnées éditoriales, la bande-annonce et la référence studio.
+     */
     private function mapFilmToDiscover(Film $film): array
     {
         // Tout est résolu depuis la base : l'import (`app:catalogue:import-bunny`)
@@ -327,6 +434,12 @@ class CatalogueDiscoverController extends AbstractController
         ];
     }
 
+    /**
+     * Convertit une Serie publiée au format DiscoverWork : saisons et épisodes
+     * issus de la base, chaque épisode recevant son URL HLS et son numéro réel.
+     * Slugs générés : `saison-{N}` pour une saison, `e-{NN}` pour un épisode
+     * (numéros stockés en base).
+     */
     private function mapSerieToDiscover(Serie $serie): array
     {
         $seasons = [];
@@ -392,6 +505,8 @@ class CatalogueDiscoverController extends AbstractController
     }
 
     /**
+     * Noms des genres ou des pays rattachés à une œuvre.
+     *
      * @param  iterable<\App\Entity\Genre|\App\Entity\Country> $items
      * @return list<string>
      */
@@ -405,6 +520,8 @@ class CatalogueDiscoverController extends AbstractController
     }
 
     /**
+     * Noms complets (« prénom nom ») des réalisateurs ou acteurs d'un film.
+     *
      * @param  iterable<\App\Entity\Person> $people
      * @return list<string>
      */
@@ -441,6 +558,18 @@ class CatalogueDiscoverController extends AbstractController
         ];
     }
 
+    /**
+     * Convertit un chemin Bunny Storage (`bunnyVideoId`, `trailerVideoId`,
+     * `FilmPart.bunnyVideoId`) en URL de lecture HLS servie par la pull zone
+     * de la zone catalogue.
+     *
+     * Le chemin est traité comme un DOSSIER contenant un rendu HLS : on y
+     * ajoute `/master.m3u8`. Exemple : `FILMS/CLEOPATRA/Cleopatra` →
+     * `https://cinaftv-movies.b-cdn.net/FILMS/CLEOPATRA/Cleopatra/master.m3u8`.
+     * Aucun appel réseau : l'existence du manifeste n'est pas vérifiée.
+     *
+     * @return string URL absolue, ou chaîne vide si la zone catalogue n'est pas déclarée.
+     */
     private function buildHlsUrl(string $bunnyPath): string
     {
         try {
@@ -452,6 +581,11 @@ class CatalogueDiscoverController extends AbstractController
         return $storage->getPublicUrl($path . '/' . self::HLS_MANIFEST);
     }
 
+    /**
+     * Slug simplifié pour les identifiants de saison et d'épisode générés ici
+     * (`saison-1`, `e-01`) : toute suite de caractères non alphanumériques
+     * devient « - », minuscules, « item » si le résultat est vide.
+     */
     private function slugify(string $name): string
     {
         $slug = strtolower(preg_replace('/[^a-z0-9]+/i', '-', $name) ?? '');

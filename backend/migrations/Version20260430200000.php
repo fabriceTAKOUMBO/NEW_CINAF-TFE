@@ -22,6 +22,11 @@ use Doctrine\Migrations\AbstractMigration;
  *
  * Cette migration finalise la cardinalité de la relation Studio↔Film/Serie
  * définie en Phase A : tout contenu publié appartient à un studio identifié.
+ *
+ * NB : les entités Film et Serie déclarent encore leur colonne `studio_id`
+ * nullable. C'est pourquoi `doctrine:migrations:diff` propose ensuite un
+ * `ALTER ... studio_id DROP NOT NULL` parasite, à retirer à la main (gotcha
+ * n° 16 de BACKEND_MEMORY.md).
  */
 final class Version20260430200000 extends AbstractMigration
 {
@@ -34,6 +39,8 @@ final class Version20260430200000 extends AbstractMigration
     {
         // Garde-fou : la migration échoue proprement si des lignes orphelines
         // restent. Plus explicite que l'erreur PostgreSQL par défaut.
+        // Bloc PL/pgSQL anonyme (DO $$ ... $$) : RAISE EXCEPTION interrompt la
+        // migration avec le nombre de lignes fautives.
         $this->addSql(<<<'SQL'
             DO $$
             DECLARE

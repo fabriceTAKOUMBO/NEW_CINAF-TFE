@@ -9,6 +9,25 @@ use Doctrine\Migrations\AbstractMigration;
 
 /**
  * Auto-generated Migration: Please modify to your needs!
+ *
+ * Sprint 2 — schéma du catalogue : tables `film`, `serie`, `season`, `episode`,
+ * `genre`, `country`, `language`, `person`, `tag` et `featured_content` (mise
+ * en avant d'un film ou d'une série), plus les tables de jointure ManyToMany
+ * (`film_genre`, `film_country`, `film_director`, `film_cast`, `film_tag`,
+ * `serie_genre`, `serie_country`, `serie_tag`).
+ *
+ * Contraintes notables :
+ *  - slugs uniques pour film, serie, genre et tag ;
+ *  - un numéro de saison unique par série (`uniq_season_serie_number`) et un
+ *    numéro d'épisode unique par saison (`uniq_episode_season_number`) ;
+ *  - les lignes de jointure et de mise en avant sont supprimées en cascade avec
+ *    leur film/série ; en revanche les FK season → serie et episode → season
+ *    n'ont pas de ON DELETE CASCADE : c'est Doctrine (cascade remove sur les
+ *    collections) qui supprime saisons et épisodes.
+ *
+ * Évolutions ultérieures : `is_premium` supprimé (Version20260514091211),
+ * `bunny_video_id` / `trailer_video_id` élargis à 500 caractères
+ * (Version20260508134426), statut et studio ajoutés (Version20260430100100).
  */
 final class Version20260423012959 extends AbstractMigration
 {

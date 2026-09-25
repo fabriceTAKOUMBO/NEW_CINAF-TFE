@@ -11,10 +11,22 @@ use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\PasswordHasher\Hasher\UserPasswordHasherInterface;
 use Symfony\Component\Uid\Uuid;
 
+/**
+ * Tests fonctionnels du profil studio : GET et PATCH /api/studio/me (StudioMeController).
+ *
+ * Vérifie la forme de la réponse (studio + compteurs du tableau de bord), le
+ * refus d'un créateur sans studio (403) et les règles de mise à jour du nom et
+ * de la description (400 champ vide ou absent, 409 nom déjà pris, 401 anonyme).
+ *
+ * Lancement : php bin/phpunit tests/Studio/Controller/StudioMeControllerTest.php
+ */
 class StudioMeControllerTest extends ApiTestCase
 {
     use StudioTestTrait;
 
+    /**
+     * GET /me renvoie le studio de l'utilisateur et des compteurs entiers (200).
+     */
     public function testGetMeReturnsStudioWithStats(): void
     {
         $client = static::createClient();
@@ -36,6 +48,9 @@ class StudioMeControllerTest extends ApiTestCase
         }
     }
 
+    /**
+     * Un utilisateur ROLE_CREATEUR sans studio associé reçoit 403.
+     */
     public function testGetMeUserWithoutStudio403(): void
     {
         $client = static::createClient();
@@ -65,6 +80,9 @@ class StudioMeControllerTest extends ApiTestCase
     }
 
 
+    /**
+     * PATCH du nom et de la description : 200 et valeurs mises à jour.
+     */
     public function testUpdateNameAndDescriptionWithCreateurReturns200(): void
     {
         $client = static::createClient();
@@ -80,6 +98,9 @@ class StudioMeControllerTest extends ApiTestCase
         $this->assertSame('Nouvelle description du studio.', $body['description']);
     }
 
+    /**
+     * PATCH du seul nom : 200, la description reste inchangée.
+     */
     public function testUpdateNameOnlyReturns200(): void
     {
         $client = static::createClient();
@@ -95,6 +116,9 @@ class StudioMeControllerTest extends ApiTestCase
         $this->assertSame($originalDescription, $body['description']);
     }
 
+    /**
+     * Un nom réduit à des espaces est refusé : 400.
+     */
     public function testUpdateWithEmptyNameReturns400(): void
     {
         $client = static::createClient();
@@ -105,6 +129,9 @@ class StudioMeControllerTest extends ApiTestCase
         $this->assertSame(Response::HTTP_BAD_REQUEST, $resp->getStatusCode());
     }
 
+    /**
+     * Reprendre le nom d'un autre studio : 409.
+     */
     public function testUpdateWithDuplicateNameReturns409(): void
     {
         $client = static::createClient();
@@ -118,6 +145,9 @@ class StudioMeControllerTest extends ApiTestCase
         $this->assertSame(Response::HTTP_CONFLICT, $resp->getStatusCode());
     }
 
+    /**
+     * Corps JSON sans `name` ni `description` : 400.
+     */
     public function testUpdateWithoutFieldsReturns400(): void
     {
         $client = static::createClient();
@@ -128,6 +158,9 @@ class StudioMeControllerTest extends ApiTestCase
         $this->assertSame(Response::HTTP_BAD_REQUEST, $resp->getStatusCode());
     }
 
+    /**
+     * PATCH sans JWT : 401.
+     */
     public function testUpdateRefusesAnonymousUserWith401(): void
     {
         $client = static::createClient();

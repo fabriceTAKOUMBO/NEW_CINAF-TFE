@@ -13,6 +13,12 @@ use Symfony\Component\HttpFoundation\Response;
  * Each test seeds its own data through seedPublishedFilm() AFTER creating the
  * HTTP client (WebTestCase forbids booting the kernel twice).
  *
+ * En français : tests fonctionnels de FilmController — liste, fiche,
+ * recherche (titre, genre, année), listes spéciales (featured, trending, new),
+ * contrôle d'accès de PATCH / DELETE (401 sans jeton valide, 403 pour
+ * ROLE_USER, succès pour ROLE_ADMIN) et compteur de vues. Le masquage des
+ * films non PUBLISHED est couvert par PublicCatalogueStatusFilterTest.
+ *
  * Run: php bin/phpunit tests/Controller/FilmControllerTest.php
  */
 class FilmControllerTest extends ApiTestCase
@@ -91,6 +97,9 @@ class FilmControllerTest extends ApiTestCase
 
     /**
      * GET /api/films/search?genre=Action → 200, all results carry the genre.
+     *
+     * Aucun genre n'existant en base de test, la recherche renvoie une liste
+     * vide : en pratique, seuls le 200 et la structure paginée sont vérifiés.
      */
     public function testSearchByGenre(): void
     {
@@ -131,6 +140,8 @@ class FilmControllerTest extends ApiTestCase
 
     /**
      * GET /api/films/featured → 200 with an array payload.
+     *
+     * Aucune mise en avant n'existe en base de test : la liste est vide.
      */
     public function testFeatured(): void
     {
@@ -143,6 +154,8 @@ class FilmControllerTest extends ApiTestCase
 
     /**
      * GET /api/films/trending → 200 with an array payload (sorted by views desc).
+     *
+     * Le tri annoncé est celui de l'endpoint : le test ne vérifie que le type tableau.
      */
     public function testTrending(): void
     {
@@ -155,6 +168,8 @@ class FilmControllerTest extends ApiTestCase
 
     /**
      * GET /api/films/new → 200 with an array payload (sorted by createdAt desc).
+     *
+     * Comme pour trending, le tri n'est pas vérifié, seulement le type tableau.
      */
     public function testNew(): void
     {

@@ -19,6 +19,14 @@ use Doctrine\Migrations\AbstractMigration;
  * Note: the auto-generated `DROP TABLE refresh_tokens` / `DROP SEQUENCE`
  * statements (mapped-superclass JWT bundle, see Version20260427095608)
  * have been omitted intentionally.
+ *
+ * En français : crée la table `studio` (maison de production qui publie des
+ * films et des séries). L'index unique sur `owner_id` traduit la relation
+ * OneToOne « un utilisateur possède au plus un studio », et ON DELETE RESTRICT
+ * empêche de supprimer un utilisateur qui possède encore un studio. `name`,
+ * `slug` et `bunny_folder` sont uniques ; le slug sert aussi à construire le
+ * dossier Bunny du studio (`studios/{slug}/`). La colonne `is_validated` est
+ * ajoutée plus tard (Version20260514114920).
  */
 final class Version20260430100000 extends AbstractMigration
 {

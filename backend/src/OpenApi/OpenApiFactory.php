@@ -11,15 +11,41 @@ use ApiPlatform\OpenApi\Model\RequestBody;
 use ApiPlatform\OpenApi\Model\SecurityScheme;
 use ApiPlatform\OpenApi\OpenApi;
 
+/**
+ * Documentation OpenAPI écrite à la main pour les premières routes de l'API
+ * CINAF (Swagger UI : `/api/docs`).
+ *
+ * API Platform ne documente que ses propres ressources ; or les routes CINAF
+ * sont des contrôleurs Symfony classiques. Ce décorateur de
+ * `api_platform.openapi.factory` (déclaré dans `config/services.yaml`) :
+ *  - déclare le schéma de sécurité `bearerAuth` (JWT), utilisé par le bouton
+ *    « Authorize » de Swagger UI et par toutes les opérations protégées ;
+ *  - décrit en détail, avec leurs corps de requête, les routes Auth, Users
+ *    (RGPD) et le catalogue du Sprint 2 (films, séries, épisodes, référentiels).
+ *
+ * Toutes les autres routes /api (Découvrir, Admin, Studio, abonnements…) sont
+ * ajoutées ensuite par {@see RouteOpenApiFactory}, qui s'exécute après ce
+ * décorateur et ne touche pas aux opérations déjà décrites ici.
+ *
+ * Ce fichier ne fait que DOCUMENTER : l'accès réel est imposé par le pare-feu
+ * (`security.yaml`) et les attributs #[IsGranted] des contrôleurs.
+ */
 class OpenApiFactory implements OpenApiFactoryInterface
 {
+    /** @param OpenApiFactoryInterface $decorated Fabrique d'origine d'API Platform (service `.inner`). */
     public function __construct(private OpenApiFactoryInterface $decorated) {}
 
+    /**
+     * Construit la spécification : part de celle d'API Platform, y ajoute le
+     * schéma `bearerAuth` puis les chemins décrits ci-dessous.
+     */
     public function __invoke(array $context = []): OpenApi
     {
         $openApi = ($this->decorated)($context);
 
         // ── Security scheme JWT Bearer ────────────────────────────────────
+        // Le nom `bearerAuth` est aussi celui qu'utilise RouteOpenApiFactory :
+        // ne pas le renommer d'un seul côté.
         $components = $openApi->getComponents() ?? new Components();
         $securitySchemes = $components->getSecuritySchemes() ?? new \ArrayObject();
         $securitySchemes['bearerAuth'] = new SecurityScheme(
@@ -31,9 +57,13 @@ class OpenApiFactory implements OpenApiFactoryInterface
         $openApi = $openApi->withComponents($components->withSecuritySchemes($securitySchemes));
 
         // ── Helpers ───────────────────────────────────────────────────────
+        // `security` d'une opération : [] = aucune authentification (route
+        // publique) ; $secured = jeton JWT exigé (cadenas dans Swagger UI).
         $public  = [];
         $secured = [['bearerAuth' => []]];
 
+        // Corps JSON obligatoire décrit par un schéma, et liste de réponses
+        // {code HTTP => description} au format attendu par API Platform.
         $jsonBody = fn(array $schema, string $description = '') => new RequestBody(
             description: $description,
             content: new \ArrayObject(['application/json' => new MediaType(new \ArrayObject($schema))]),
@@ -45,6 +75,7 @@ class OpenApiFactory implements OpenApiFactoryInterface
             $codes
         );
 
+        // ═══ Auth — inscription, connexion JWT, jetons, mot de passe ═══════
         // ── /api/auth/register ────────────────────────────────────────────
         $openApi->getPaths()->addPath('/api/auth/register', new PathItem(
             post: new Operation(
@@ -177,6 +208,7 @@ class OpenApiFactory implements OpenApiFactoryInterface
             ),
         ));
 
+        // ═══ Users — profil et droits RGPD (consultation, export, suppression) ═══
         // ── /api/users/{id} GET ───────────────────────────────────────────
         $idParam = new Parameter('id', 'path', 'UUID de l\'utilisateur', required: true, schema: ['type' => 'string', 'format' => 'uuid']);
 
@@ -231,6 +263,8 @@ class OpenApiFactory implements OpenApiFactoryInterface
         ));
 
         // ═══ Sprint 2 — Catalogue ═══════════════════════════════════════════
+        // Films, séries, épisodes et référentiels (genres, pays, langues,
+        // personnes). Paramètres partagés par plusieurs opérations :
         $catalogueId = new Parameter('id', 'path', 'UUID', required: true, schema: ['type' => 'string', 'format' => 'uuid']);
         $pageParam   = new Parameter('page', 'query', 'Numéro de page (défaut 1)', required: false, schema: ['type' => 'integer', 'minimum' => 1]);
         $limitParam  = new Parameter('limit', 'query', 'Taille de page (défaut 30, max 100)', required: false, schema: ['type' => 'integer', 'minimum' => 1, 'maximum' => 100]);

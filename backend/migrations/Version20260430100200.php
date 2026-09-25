@@ -21,6 +21,15 @@ use Doctrine\Migrations\AbstractMigration;
  * - PARTIAL UNIQUE index `uniq_withdrawal_pending` to enforce a single
  *   PENDING request per (target_type, target_id). Doctrine doesn't generate
  *   partial indexes, so we add it via raw SQL.
+ *
+ * En français : crée la table des demandes de retrait (un studio demande le
+ * retrait d'un de ses contenus, un admin approuve ou rejette). La cible est
+ * polymorphe (`target_type` + `target_id`) : il n'y a donc pas de clé
+ * étrangère vers film ou serie. L'index unique partiel interdit deux demandes
+ * PENDING pour le même contenu tout en conservant l'historique des demandes
+ * traitées. Comme il est invisible pour l'ORM, `migrations:diff` propose
+ * ensuite de le supprimer (DROP INDEX uniq_withdrawal_pending) : ligne à
+ * retirer à la main (gotcha n° 16 de BACKEND_MEMORY.md).
  */
 final class Version20260430100200 extends AbstractMigration
 {

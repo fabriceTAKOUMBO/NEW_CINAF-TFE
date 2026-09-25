@@ -102,7 +102,11 @@ final class RouteDocumentation
             'GET /api/catalogue/discover/{slug}' => [
                 'tag' => $discover,
                 'summary' => "Détail d'une œuvre : saisons, épisodes et URL de lecture HLS",
-                'responses' => [502 => $bunnyDown],
+                'responses' => [
+                    404 => 'Œuvre inconnue, ou jamais publiée (brouillon, en attente)',
+                    410 => 'Œuvre retirée de la plateforme : {message, status: WITHDRAWN, kind, title}',
+                    502 => $bunnyDown,
+                ],
             ],
             'GET /api/catalogue/discover/{slug}/can-play' => [
                 'tag' => $discover,

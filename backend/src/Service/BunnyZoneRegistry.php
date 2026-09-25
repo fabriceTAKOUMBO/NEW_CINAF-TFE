@@ -8,6 +8,16 @@ namespace App\Service;
  * domaine CDN public. Plutôt que de figer le code sur une seule zone, ce
  * registry instancie un BunnyStorageService par zone à la demande et mémoïze
  * les instances pour la durée de la requête.
+ *
+ * Configuration : paramètre `app.bunny.zones` de `config/services.yaml`
+ * (une entrée par zone, AccessKey lue dans `.env.local`), endpoint global
+ * `BUNNY_ENDPOINT`, zone par défaut `BUNNY_DEFAULT_ZONE` et bundle CA
+ * `config/certs/cacert.pem`. Ajouter une zone ne demande aucun changement
+ * de code : une entrée dans services.yaml, sa clé dans `.env.local`, puis
+ * un vidage du cache.
+ *
+ * Point d'entrée unique vers Bunny Storage : les contrôleurs, services et
+ * commandes injectent ce registry, jamais BunnyStorageService directement.
  */
 class BunnyZoneRegistry
 {
@@ -19,6 +29,12 @@ class BunnyZoneRegistry
      *        Map indexée par nom de zone (ex: "cinaftv-movies"). `endpoint` est
      *        optionnel : il n'est nécessaire que pour une zone hébergée hors de
      *        la région par défaut (ex. Stockholm → `se.storage.bunnycdn.com`).
+     * @param string $endpoint    Endpoint Storage global, utilisé par toute zone sans `endpoint` propre.
+     * @param string $caBundle    Bundle CA transmis à chaque client Guzzle (indispensable sous Windows).
+     * @param string $defaultZone Zone utilisée quand get() est appelé sans nom.
+     *
+     * @throws \InvalidArgumentException si la zone par défaut n'est pas déclarée dans `$zones`
+     *                                   (erreur de configuration détectée dès la construction du service).
      */
     public function __construct(
         private readonly string $endpoint,
@@ -33,7 +49,12 @@ class BunnyZoneRegistry
         }
     }
 
-    /** @return list<string> */
+    /**
+     * Noms des zones déclarées, triés par ordre alphabétique (affichage des
+     * zones disponibles et messages d'erreur).
+     *
+     * @return list<string>
+     */
     public function getZoneNames(): array
     {
         $names = array_keys($this->zones);
@@ -41,11 +62,13 @@ class BunnyZoneRegistry
         return $names;
     }
 
+    /** Nom de la zone utilisée quand aucune zone n'est précisée. */
     public function getDefaultZoneName(): string
     {
         return $this->defaultZone;
     }
 
+    /** Indique si une zone est déclarée, sans instancier son client. */
     public function has(string $name): bool
     {
         return isset($this->zones[$name]);
@@ -54,6 +77,10 @@ class BunnyZoneRegistry
     /**
      * Résout le service Bunny Storage pour une zone donnée.
      * Si $name est null ou vide, utilise la zone par défaut.
+     *
+     * Le client est créé au premier appel pour cette zone puis réutilisé
+     * (opérateur `??=`) : un seul client Guzzle par zone tant que le service
+     * vit (une requête HTTP ou une exécution de commande).
      *
      * @throws \InvalidArgumentException si la zone est inconnue
      */

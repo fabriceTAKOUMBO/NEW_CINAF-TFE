@@ -7,6 +7,17 @@ use Doctrine\Bundle\DoctrineBundle\Repository\ServiceEntityRepository;
 use Doctrine\Persistence\ManagerRegistry;
 use Symfony\Component\Uid\Uuid;
 
+/**
+ * Requêtes sur les séries ; même organisation que FilmRepository :
+ *  - public (/api/series, catalogue discover, chaîne publique d'un studio) :
+ *    toujours appelées avec le statut PUBLISHED ;
+ *  - admin (/api/admin/series) : findAllPaginated() / countAll(), tous statuts ;
+ *  - studio (/api/studio/series, tableau de bord) : findByStudioPaginated(),
+ *    countByStudio*().
+ *
+ * Convention : un paramètre `$status` null ou '' signifie « pas de filtre de
+ * statut ». Les pages sont numérotées à partir de 1.
+ */
 class SerieRepository extends ServiceEntityRepository
 {
     public function __construct(ManagerRegistry $registry)
@@ -16,6 +27,10 @@ class SerieRepository extends ServiceEntityRepository
 
     /**
      * Liste paginée admin : toutes les séries, filtres optionnels.
+     *
+     * Filtres : statut, studio, recherche insensible à la casse sur le titre.
+     * Aussi utilisée par le catalogue public (source `db`) avec PUBLISHED.
+     * Tri : plus récentes d'abord.
      *
      * @return Serie[]
      */
@@ -34,6 +49,7 @@ class SerieRepository extends ServiceEntityRepository
         return $qb->getQuery()->getResult();
     }
 
+    /** Nombre total de séries correspondant aux mêmes filtres que findAllPaginated(). */
     public function countAll(?string $status, ?Uuid $studioId, ?string $search): int
     {
         $qb = $this->buildAllPaginatedQuery($status, $studioId, $search)
@@ -42,6 +58,10 @@ class SerieRepository extends ServiceEntityRepository
         return (int) $qb->getQuery()->getSingleScalarResult();
     }
 
+    /**
+     * Requête commune à findAllPaginated() et countAll() : garantit que la
+     * liste et son total appliquent exactement les mêmes filtres.
+     */
     private function buildAllPaginatedQuery(?string $status, ?Uuid $studioId, ?string $search): \Doctrine\ORM\QueryBuilder
     {
         $qb = $this->createQueryBuilder('s');
@@ -61,6 +81,11 @@ class SerieRepository extends ServiceEntityRepository
     }
 
     /**
+     * Liste paginée des séries d'un studio, optionnellement filtrée par statut.
+     *
+     * Sert au module Studio (tous statuts) et à la chaîne publique du studio
+     * (avec PUBLISHED). Tri : plus récentes d'abord.
+     *
      * @return array{data: Serie[], total: int, page: int, limit: int}
      */
     public function findByStudioPaginated(Studio $studio, ?string $status, int $page, int $limit): array
@@ -74,6 +99,7 @@ class SerieRepository extends ServiceEntityRepository
             $qb->andWhere('s.status = :status')->setParameter('status', $status);
         }
 
+        // Total calculé sur une copie sans ORDER BY, avant la pagination.
         $countQb = clone $qb;
         $countQb->resetDQLPart('orderBy');
         $total = (int) $countQb->select('COUNT(s.id)')->getQuery()->getSingleScalarResult();
@@ -87,6 +113,7 @@ class SerieRepository extends ServiceEntityRepository
         return ['data' => $items, 'total' => $total, 'page' => $page, 'limit' => $limit];
     }
 
+    /** Nombre de séries d'un studio dans un statut donné (tableau de bord studio, fiche publique). */
     public function countByStudioAndStatus(Studio $studio, string $status): int
     {
         return (int) $this->createQueryBuilder('s')
@@ -111,6 +138,7 @@ class SerieRepository extends ServiceEntityRepository
         if ($studios === []) {
             return [];
         }
+        // Un studio sans série dans ce statut est absent du résultat (défaut 0 côté appelant).
         $rows = $this->createQueryBuilder('s')
             ->select('IDENTITY(s.studio) AS studioId, COUNT(s.id) AS nb')
             ->andWhere('s.studio IN (:studios)')
@@ -128,6 +156,7 @@ class SerieRepository extends ServiceEntityRepository
         return $counts;
     }
 
+    /** Nombre total de séries d'un studio, tous statuts confondus (tableau de bord studio). */
     public function countByStudio(Studio $studio): int
     {
         return (int) $this->createQueryBuilder('s')
@@ -138,6 +167,11 @@ class SerieRepository extends ServiceEntityRepository
             ->getSingleScalarResult();
     }
 
+    /**
+     * Liste paginée du catalogue public GET /api/series (plus récentes d'abord).
+     *
+     * @return array{data: Serie[], total: int, page: int, limit: int}
+     */
     public function findPaginated(int $page = 1, int $limit = 30, ?string $status = null): array
     {
         $qb = $this->createQueryBuilder('s')
@@ -157,6 +191,18 @@ class SerieRepository extends ServiceEntityRepository
         return ['data' => $items, 'total' => $total, 'page' => $page, 'limit' => $limit];
     }
 
+    /**
+     * Recherche du catalogue public GET /api/series/search.
+     *
+     * Texte libre sur titre + synopsis (insensible à la casse), combiné aux
+     * filtres optionnels. Tri : plus récentes d'abord. Même limite que
+     * FilmRepository::search() : la jointure sur les genres peut réduire le
+     * nombre de séries distinctes par page (total, lui, exact).
+     *
+     * @param array<string, mixed> $filters Clés reconnues : `genre` (nom ou slug), `year`.
+     *
+     * @return array{data: Serie[], total: int, page: int, limit: int}
+     */
     public function search(?string $q, array $filters = [], int $page = 1, int $limit = 30, ?string $status = null): array
     {
         $qb = $this->createQueryBuilder('s')->leftJoin('s.genres', 'g');
@@ -174,6 +220,7 @@ class SerieRepository extends ServiceEntityRepository
             $qb->andWhere('s.status = :status')->setParameter('status', $status);
         }
 
+        // DISTINCT : une série jointe à plusieurs genres ne doit compter qu'une fois.
         $total = (int) (clone $qb)->select('COUNT(DISTINCT s.id)')->getQuery()->getSingleScalarResult();
 
         $items = $qb->setFirstResult(($page - 1) * $limit)

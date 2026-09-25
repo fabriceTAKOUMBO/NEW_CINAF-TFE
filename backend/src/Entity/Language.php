@@ -5,6 +5,13 @@ use App\Repository\LanguageRepository;
 use Doctrine\ORM\Mapping as ORM;
 use Symfony\Component\Uid\Uuid;
 
+/**
+ * Langue (référentiel), exposée en lecture par GET /api/languages.
+ *
+ * Aucune relation avec Film ni Serie dans le mapping actuel : le paramètre
+ * `lang` lu par GET /api/films/search n'a donc aucun effet sur la recherche.
+ * Aucun endpoint ni fixture ne crée de langue dans le code actuel.
+ */
 #[ORM\Entity(repositoryClass: LanguageRepository::class)]
 #[ORM\Table(name: 'language')]
 #[ORM\HasLifecycleCallbacks]
@@ -17,12 +24,14 @@ class Language
     #[ORM\Column(length: 100)]
     private string $name;
 
+    /** Code de la langue (5 caractères max.), unique. */
     #[ORM\Column(length: 5, unique: true)]
     private string $isoCode;
 
     #[ORM\Column]
     private \DateTimeImmutable $createdAt;
 
+    /** Mis à jour automatiquement à chaque modification (callback onPreUpdate). */
     #[ORM\Column]
     private \DateTimeImmutable $updatedAt;
 
@@ -33,6 +42,7 @@ class Language
         $this->updatedAt = new \DateTimeImmutable();
     }
 
+    /** Callback Doctrine (PreUpdate) : horodate chaque modification persistée. */
     #[ORM\PreUpdate]
     public function onPreUpdate(): void
     {
@@ -47,6 +57,11 @@ class Language
     public function getCreatedAt(): \DateTimeImmutable { return $this->createdAt; }
     public function getUpdatedAt(): \DateTimeImmutable { return $this->updatedAt; }
 
+    /**
+     * Sérialise la langue : id, name, isoCode.
+     *
+     * @return array<string, mixed>
+     */
     public function toArray(): array
     {
         return [

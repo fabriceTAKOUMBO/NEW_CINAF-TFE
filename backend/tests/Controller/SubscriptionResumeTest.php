@@ -15,9 +15,16 @@ use Symfony\Component\Uid\Uuid;
 /**
  * Tests fonctionnels de POST /api/subscriptions/resume — réactivation d'un
  * abonnement précédemment résilié de manière différée.
+ *
+ * En mode simulé (STRIPE_ENABLED=false) : seule la base locale est concernée.
+ * Lancement : `php bin/phpunit tests/Controller/SubscriptionResumeTest.php`.
  */
 final class SubscriptionResumeTest extends ApiTestCase
 {
+    /**
+     * Cycle complet : /cancel renseigne canceledAt, puis /resume l'efface ;
+     * le statut reste ACTIVE et la réponse 200 montre `canceledAt: null`.
+     */
     public function testResumeClearsCanceledAt(): void
     {
         $client = static::createClient();
@@ -47,6 +54,11 @@ final class SubscriptionResumeTest extends ApiTestCase
         $this->assertNull($body['subscription']['canceledAt']);
     }
 
+    /**
+     * Abonnement actif jamais résilié (canceledAt null) → /resume répond 409
+     * « n'est pas en cours de résiliation ». Malgré son nom, ce test ne couvre pas
+     * un abonnement expiré (cf. explication ci-dessous).
+     */
     public function testResumeReturns409IfSubAlreadyExpired(): void
     {
         $client = static::createClient();
@@ -78,6 +90,9 @@ final class SubscriptionResumeTest extends ApiTestCase
     // ----------------------------------------------------------------
 
     /**
+     * Persiste un utilisateur ROLE_USER (email unique) et forge son JWT sans passer
+     * par `/api/auth/login`.
+     *
      * @return array{0:User,1:string}
      */
     private function createUserWithToken(EntityManagerInterface $em): array
@@ -100,6 +115,7 @@ final class SubscriptionResumeTest extends ApiTestCase
         return [$user, $jwt->create($user)];
     }
 
+    /** Persiste un plan mensuel actif au nom unique. */
     private function seedPlan(EntityManagerInterface $em): SubscriptionPlan
     {
         $plan = new SubscriptionPlan();
@@ -115,6 +131,7 @@ final class SubscriptionResumeTest extends ApiTestCase
         return $plan;
     }
 
+    /** Persiste un abonnement ACTIVE (début il y a 2 jours, fin dans `$endsInDays` jours), non résilié. */
     private function seedActiveSubscription(
         EntityManagerInterface $em,
         User $user,

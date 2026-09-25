@@ -1,3 +1,7 @@
+# Migrations du schéma PostgreSQL, rangées dans backend/migrations/.
+# Rappel CINAF : relire chaque migration générée par `migrations:diff` et en
+# retirer les lignes parasites (DROP de refresh_tokens ou de
+# uniq_withdrawal_pending, `studio_id DROP NOT NULL`) : gotchas n° 1 et 16.
 doctrine_migrations:
     migrations_paths:
         # namespace is arbitrary but should be different from App\Migrations

@@ -29,6 +29,14 @@ use Symfony\Component\DependencyInjection\Attribute\Autowire;
  *
  * Idempotente : si les IDs sont déjà bons, la commande re-flush silencieusement
  * (l'overhead est négligeable et ça simplifie le code — pas de "skip").
+ *
+ * Aucun appel à l'API Stripe : la source de vérité est l'environnement. Le
+ * `stripePriceId` d'un plan est ensuite transmis à Stripe par `StripeService`
+ * lors de la création d'une session Checkout ; un ID d'un autre compte Stripe
+ * y serait refusé, d'où cette resynchronisation.
+ *
+ * Usage : `php bin/console app:stripe:sync-plans`, après avoir renseigné
+ * `STRIPE_PRICE_MONTHLY` et `STRIPE_PRICE_YEARLY` dans `backend/.env.local`.
  */
 #[AsCommand(
     name: 'app:stripe:sync-plans',
@@ -61,6 +69,9 @@ class StripeSyncPlansCommand extends Command
 
     /**
      * Synchronise les deux plans. Affiche un tableau "Avant / Après" pour audit visuel.
+     *
+     * @return int Command::SUCCESS, self::EXIT_MISSING_ENV (variable d'env vide) ou
+     *             self::EXIT_PLAN_NOT_FOUND (plan « Mensuel » ou « Annuel » absent).
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {

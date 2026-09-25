@@ -11,6 +11,11 @@ use Doctrine\Persistence\ManagerRegistry;
  * Repository de la liaison user ↔ studio (abonnement gratuit type
  * « follow YouTube »).
  *
+ * À ne pas confondre avec SubscriptionRepository (abonnement payant).
+ * Appelé par StudioPublicController (suivre / ne plus suivre, état du suivi,
+ * compteurs `subscribersCount`) et par le tableau de bord GET /api/studio/me.
+ * Chaque ligne est un suivi en cours : se désabonner supprime la ligne.
+ *
  * @extends ServiceEntityRepository<StudioSubscription>
  */
 class StudioSubscriptionRepository extends ServiceEntityRepository
@@ -26,6 +31,9 @@ class StudioSubscriptionRepository extends ServiceEntityRepository
      * Implémentation : requête d'existence (`SELECT 1 ... LIMIT 1`) plutôt
      * que de matérialiser l'entité — c'est le pattern le moins coûteux pour
      * un endpoint « status » potentiellement appelé sur chaque page studio.
+     *
+     * Appelée par GET /api/studios/{slug}/subscription et, pour rendre
+     * l'abonnement idempotent, par POST /api/studios/{slug}/subscribe.
      */
     public function isSubscribed(User $user, Studio $studio): bool
     {
@@ -46,6 +54,11 @@ class StudioSubscriptionRepository extends ServiceEntityRepository
      * Compte le nombre d'abonnés actifs d'un studio donné. Utilisé pour
      * exposer `subscribersCount` sur les endpoints publics (carte studio
      * + fiche détail) et sur le dashboard producteur.
+     *
+     * Précision : les cartes des listes publiques passent désormais par la
+     * variante groupée countByStudios() ; countByStudio() sert à la fiche
+     * détail, aux réponses de POST /api/studios/{slug}/subscribe et au
+     * tableau de bord GET /api/studio/me.
      */
     public function countByStudio(Studio $studio): int
     {
@@ -69,6 +82,8 @@ class StudioSubscriptionRepository extends ServiceEntityRepository
         if ($studios === []) {
             return [];
         }
+        // IDENTITY() lit directement la FK studio_id. Un studio sans abonné est
+        // absent du résultat : l'appelant prévoit la valeur par défaut 0.
         $rows = $this->createQueryBuilder('s')
             ->select('IDENTITY(s.studio) AS studioId, COUNT(s.id) AS nb')
             ->andWhere('s.studio IN (:studios)')

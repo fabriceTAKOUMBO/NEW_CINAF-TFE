@@ -12,6 +12,11 @@ use Symfony\Component\HttpFoundation\Response;
  * Each test seeds its own data AFTER creating the HTTP client
  * (WebTestCase forbids booting the kernel twice).
  *
+ * En français : tests fonctionnels de SerieController (liste, fiche,
+ * recherche, saisons, épisodes d'une saison, PATCH admin) et du détail
+ * d'épisode d'EpisodeController (401 sans jeton, 200, 404). Le masquage des
+ * séries non PUBLISHED est couvert par PublicCatalogueStatusFilterTest.
+ *
  * Run: php bin/phpunit tests/Controller/SerieControllerTest.php
  */
 class SerieControllerTest extends ApiTestCase
@@ -85,6 +90,9 @@ class SerieControllerTest extends ApiTestCase
 
     /**
      * GET /api/series/search?genre=Drame → 200, all results carry the genre.
+     *
+     * Aucun genre n'existant en base de test, la recherche renvoie une liste
+     * vide : en pratique, seuls le 200 et la structure paginée sont vérifiés.
      */
     public function testSearchSeriesByGenre(): void
     {
@@ -125,6 +133,8 @@ class SerieControllerTest extends ApiTestCase
 
     /**
      * GET /api/series/{id}/seasons → 200 with a list of seasons.
+     *
+     * La série seedée n'a aucune saison : la liste est vide, seul son type est vérifié.
      */
     public function testGetSeasons(): void
     {

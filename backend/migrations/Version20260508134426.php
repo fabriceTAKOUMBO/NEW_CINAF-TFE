@@ -35,8 +35,8 @@ use Doctrine\Migrations\AbstractMigration;
  * NOTE : la diff Doctrine génère aussi des DROP de `refresh_tokens` (gotcha #1
  * mapped-superclass JWT, à conserver) et de `uniq_withdrawal_pending` (index
  * unique partiel SQL natif Phase A, non visible côté ORM). Ces lignes ont été
- * retirées manuellement, ainsi que le `studio_id DROP NOT NULL` (Phase G doit
- * rester).
+ * retirées manuellement, ainsi que le `studio_id DROP NOT NULL` (le NOT NULL
+ * posé en Phase F par Version20260430200000 doit rester).
  */
 final class Version20260508134426 extends AbstractMigration
 {

@@ -1,3 +1,6 @@
+# Configuration par défaut de Symfony. Le pool `cache.app` (système de fichiers,
+# dans le dossier de cache du Kernel) sert notamment au cache de 5 minutes du
+# catalogue Bunny lu en direct (BunnyCatalogueService, cf. services.yaml).
 framework:
     cache:
         # Unique name of your app: used to compute stable namespaces for cache keys.

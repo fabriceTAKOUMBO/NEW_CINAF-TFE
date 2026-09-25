@@ -11,6 +11,7 @@ import { useParams, usePathname, useRouter } from "next/navigation";
 import { studios, type StudioPublic, type Work } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import Pagination from "@/components/Pagination";
+import NotFoundView from "@/components/NotFoundView";
 
 // 24 œuvres par page (aligné sur /films et /series).
 const WORKS_PER_PAGE = 24;
@@ -235,27 +236,15 @@ export default function StudioChannelPage() {
     }
   };
 
-  // État : studio introuvable / non public (404).
+  // État : studio introuvable / non public (404) — écran commun aux pages introuvables.
   if (studioStatus === 404 || (studioError && !studio)) {
     return (
-      <div className="container py-5">
-        <div className="text-center" style={{ color: "var(--cinaf-text-muted)" }}>
-          <i
-            className="bi bi-emoji-frown d-block mb-3"
-            style={{ fontSize: "4rem" }}
-          />
-          <h3 style={{ color: "var(--cinaf-text)", fontWeight: 600 }}>
-            Studio introuvable
-          </h3>
-          <p>
-            Ce studio n&apos;existe pas ou n&apos;est plus accessible publiquement.
-          </p>
-          <Link href="/studios" className="btn btn-cinaf-outline mt-3">
-            <i className="bi bi-arrow-left me-1" />
-            Retour aux studios
-          </Link>
-        </div>
-      </div>
+      <NotFoundView
+        title="Ce studio est introuvable"
+        message="Ce studio n'existe pas ou n'est plus accessible publiquement."
+        backHref="/studios"
+        backLabel="Voir tous les studios"
+      />
     );
   }
 

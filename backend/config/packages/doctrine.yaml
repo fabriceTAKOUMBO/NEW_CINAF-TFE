@@ -1,5 +1,7 @@
 doctrine:
     dbal:
+        # Connexion PostgreSQL : DATABASE_URL vient de .env / .env.local
+        # (ou de .env.test en environnement de test).
         url: '%env(resolve:DATABASE_URL)%'
 
         # IMPORTANT: You MUST configure your server version,
@@ -8,29 +10,40 @@ doctrine:
         driver: pdo_pgsql
 
         profiling_collect_backtrace: '%kernel.debug%'
+        # Transactions imbriquées gérées par des SAVEPOINT PostgreSQL.
         use_savepoints: true
     orm:
         auto_generate_proxy_classes: true
         enable_lazy_ghost_objects: true
         report_fields_where_declared: true
         validate_xml_mapping: true
+        # Noms SQL en snake_case : propriété `studioId` → colonne `studio_id`.
         naming_strategy: doctrine.orm.naming_strategy.underscore_number_aware
+        # Identifiants auto-générés en colonnes IDENTITY sur PostgreSQL. Seul le
+        # mapping gesdinet (refresh_tokens) est concerné : les entités CINAF ont
+        # des UUID générés en PHP dans leur constructeur.
         identity_generation_preferences:
             Doctrine\DBAL\Platforms\PostgreSQLPlatform: identity
         auto_mapping: true
         mappings:
+            # Entités de l'application, décrites par attributs PHP.
             App:
                 type: attribute
                 is_bundle: false
                 dir: '%kernel.project_dir%/src/Entity'
                 prefix: 'App\Entity'
                 alias: App
+            # Mapping XML fourni par le bundle gesdinet (table refresh_tokens),
+            # déclaré en mapped-superclass : `migrations:diff` ne voit pas la table
+            # et propose de la supprimer à chaque diff (gotcha n° 1, à retirer à la main).
             GesdinetJWTRefreshTokenBundle:
                 type: xml
                 is_bundle: true
                 dir: 'config/doctrine'
                 prefix: 'Gesdinet\JWTRefreshTokenBundle\Entity'
                 alias: GesdinetJWTRefreshTokenBundle
+        # Pas de conversion automatique d'un paramètre de route en entité : les
+        # contrôleurs résolvent eux-mêmes leurs UUID (réponses 400/404 explicites).
         controller_resolver:
             auto_mapping: false
 
@@ -38,8 +51,12 @@ when@test:
     doctrine:
         dbal:
             # "TEST_TOKEN" is typically set by ParaTest
+            # Le nom de base de DATABASE_URL (.env.test) reçoit le suffixe `_test` :
+            # la suite PHPUnit ne touche jamais la base de développement.
             dbname_suffix: '_test%env(default::TEST_TOKEN)%'
 
+# Production : proxies Doctrine générés au build (pas à la volée) et caches de
+# requêtes / de résultats stockés dans les pools de cache Symfony.
 when@prod:
     doctrine:
         orm:

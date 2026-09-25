@@ -1,3 +1,6 @@
+# Routes de déconnexion générées pour les pare-feux qui déclarent `logout`.
+# Aucun ne le fait dans security.yaml : la déconnexion CINAF passe par
+# POST /api/auth/logout (AuthController, révocation du refresh token).
 _security_logout:
     resource: security.route_loader.logout
     type: service

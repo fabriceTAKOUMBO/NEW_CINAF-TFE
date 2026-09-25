@@ -1,3 +1,6 @@
+# Envoi des emails (vérification d'adresse, réinitialisation du mot de passe).
+# Avec MAILER_DSN=null://null (valeur de .env et .env.test), les messages
+# sont acceptés puis jetés : aucun email réel n'est envoyé.
 framework:
     mailer:
         dsn: '%env(MAILER_DSN)%'

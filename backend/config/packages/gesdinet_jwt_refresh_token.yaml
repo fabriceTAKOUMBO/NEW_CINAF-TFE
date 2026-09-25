@@ -1,5 +1,14 @@
+# Bundle gesdinet : fournit la classe RefreshToken (table refresh_tokens), le
+# générateur et le gestionnaire de refresh tokens qu'utilise AuthController
+# (login, refresh, logout).
 gesdinet_jwt_refresh_token:
     refresh_token_class: Gesdinet\JWTRefreshTokenBundle\Entity\RefreshToken
+    # ttl (2 592 000 s = 30 jours), ttl_update et single_use ne servent qu'aux
+    # mécanismes automatiques du bundle (authenticator `refresh_jwt`, écouteur
+    # de l'événement de succès de login de lexik), inutilisés ici faute de
+    # `json_login` et de `refresh_jwt` dans security.yaml. AuthController fixe
+    # lui-même la durée (30 jours) et fait tourner le jeton à chaque
+    # /api/auth/refresh (l'ancien est supprimé).
     ttl: 2592000
     ttl_update: true
     single_use: false

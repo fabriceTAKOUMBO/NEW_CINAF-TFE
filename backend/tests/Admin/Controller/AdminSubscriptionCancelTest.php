@@ -19,9 +19,26 @@ use Symfony\Component\Uid\Uuid;
  * et applique uniquement la mise à jour locale. La sémantique attendue
  * (status reste ACTIVE, canceledAt rempli, endsAt préservé) reste vérifiable
  * par cette voie.
+ *
+ * Endpoints de App\Admin\Controller\AdminSubscriptionController, où `{id}` est
+ * l'UUID de l'UTILISATEUR (et non celui de l'abonnement) :
+ *  - DELETE /api/admin/users/{id}/subscription         résiliation différée
+ *  - POST   /api/admin/users/{id}/subscription/resume  annulation de cette résiliation
+ * Vérifié aussi : la résiliation demandée par un utilisateur ROLE_USER est
+ * refusée (403).
+ *
+ * Données : l'utilisateur cible, un admin et son jeton, un plan mensuel et un
+ * abonnement ACTIVE sans lien Stripe, créés par les helpers en bas de fichier.
+ *
+ * Lancement : `php bin/phpunit tests/Admin/Controller/AdminSubscriptionCancelTest.php`.
  */
 final class AdminSubscriptionCancelTest extends ApiTestCase
 {
+    /**
+     * Résiliation par l'admin : 200 ; en base, le statut reste ACTIVE,
+     * `canceledAt` est renseigné et `endsAt` (dans 25 jours) est préservé, donc
+     * l'utilisateur garde l'accès ; la réponse expose ce même état.
+     */
     public function testAdminCancelKeepsStatusActiveAndFillsCanceledAt(): void
     {
         $client = static::createClient();
@@ -57,6 +74,10 @@ final class AdminSubscriptionCancelTest extends ApiTestCase
         $this->assertNotNull($body['subscription']['canceledAt']);
     }
 
+    /**
+     * Un utilisateur ROLE_USER qui appelle la résiliation admin sur le compte
+     * d'un autre utilisateur est refusé : 403 (ROLE_ADMIN exigé).
+     */
     public function testAdminCancelReturns403ForNonAdmin(): void
     {
         $client = static::createClient();
@@ -66,6 +87,8 @@ final class AdminSubscriptionCancelTest extends ApiTestCase
         [$victim] = $this->createUser($em, 'victim_');
         // Création d'un utilisateur lambda (ROLE_USER) qui tente d'utiliser l'endpoint admin.
         [, $userToken] = $this->createUserWithToken($em, 'attacker_');
+        // La victime n'a même pas d'abonnement : le refus (403) tombe avant
+        // d'atteindre le contrôleur, qui aurait sinon répondu 404.
 
         $response = $this->deleteJson(
             $client,
@@ -76,6 +99,11 @@ final class AdminSubscriptionCancelTest extends ApiTestCase
         $this->assertSame(Response::HTTP_FORBIDDEN, $response->getStatusCode());
     }
 
+    /**
+     * Cycle admin résiliation → réactivation avant la fin de période : les deux
+     * appels répondent 200 et, en base, `canceledAt` redevient null tandis que
+     * le statut reste ACTIVE.
+     */
     public function testAdminResumeUndoesScheduledCancellation(): void
     {
         $client = static::createClient();
@@ -117,6 +145,9 @@ final class AdminSubscriptionCancelTest extends ApiTestCase
     // ----------------------------------------------------------------
 
     /**
+     * Persiste un administrateur (ROLE_ADMIN, email unique) et forge son JWT sans
+     * passer par `/api/auth/login`.
+     *
      * @return array{0:User,1:string}
      */
     private function createAdminWithToken(EntityManagerInterface $em): array
@@ -140,6 +171,9 @@ final class AdminSubscriptionCancelTest extends ApiTestCase
     }
 
     /**
+     * Persiste un utilisateur ROLE_USER vérifié (email = préfixe + UUID) et forge
+     * son JWT.
+     *
      * @return array{0:User,1:string}
      */
     private function createUserWithToken(EntityManagerInterface $em, string $emailPrefix = 'user_'): array
@@ -163,6 +197,9 @@ final class AdminSubscriptionCancelTest extends ApiTestCase
     }
 
     /**
+     * Variante de createUserWithToken() qui ne renvoie que l'utilisateur (jeton
+     * ignoré) : sert à créer la cible d'une action admin.
+     *
      * @return array{0:User}
      */
     private function createUser(EntityManagerInterface $em, string $emailPrefix): array
@@ -171,6 +208,7 @@ final class AdminSubscriptionCancelTest extends ApiTestCase
         return [$u];
     }
 
+    /** Persiste un plan mensuel actif (9,99 €, nom unique), sans stripePriceId. */
     private function seedPlan(EntityManagerInterface $em): SubscriptionPlan
     {
         $plan = new SubscriptionPlan();
@@ -186,6 +224,10 @@ final class AdminSubscriptionCancelTest extends ApiTestCase
         return $plan;
     }
 
+    /**
+     * Persiste un abonnement ACTIVE (début il y a 2 jours, fin dans `$endsInDays`
+     * jours), non résilié et sans lien Stripe (pas de stripeSubscriptionId).
+     */
     private function seedActiveSubscription(
         EntityManagerInterface $em,
         User $user,

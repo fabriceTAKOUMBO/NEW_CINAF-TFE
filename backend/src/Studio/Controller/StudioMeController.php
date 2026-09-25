@@ -20,6 +20,19 @@ use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
 use Symfony\Component\HttpFoundation\Request;
 
 
+/**
+ * Profil du studio de l'utilisateur connecté (préfixe `/api/studio`) : c'est
+ * la source du tableau de bord de l'espace studio.
+ *
+ * Accès : ROLE_CREATEUR (attribut `#[IsGranted]` + règle `access_control`
+ * `^/api/studio`). Le studio est toujours celui de l'utilisateur connecté,
+ * résolu par StudioOwnershipChecker::getStudioForUser() (403 s'il n'en a pas
+ * ou si son studio est inactif).
+ *
+ * Endpoints :
+ *  - GET   /me  studio courant + compteurs du tableau de bord
+ *  - PATCH /me  modification du nom et/ou de la description du studio
+ */
 #[Route('/api/studio')]
 #[IsGranted('ROLE_CREATEUR')]
 class StudioMeController extends AbstractController
@@ -36,6 +49,14 @@ class StudioMeController extends AbstractController
 
     /**
      * Studio courant + statistiques agrégées (compteurs par statut).
+     *
+     * Les totaux (`totalFilms`, `totalSeries`) comptent tous les statuts, y compris
+     * PENDING_APPROVAL qui n'a pas de compteur dédié.
+     *
+     * @return JsonResponse 200 `{studio: Studio::toArray(), stats: {totalFilms, publishedFilms,
+     *                      draftFilms, withdrawnFilms, totalSeries, publishedSeries, draftSeries,
+     *                      withdrawnSeries, pendingWithdrawals, subscribersCount}}` ;
+     *                      403 si l'utilisateur n'a pas de studio actif
      */
     #[Route('/me', name: 'studio_me', methods: ['GET'])]
     public function me(): JsonResponse
@@ -69,6 +90,23 @@ class StudioMeController extends AbstractController
         ]);
     }
 
+    /**
+     * Met à jour le nom et/ou la description du studio de l'utilisateur.
+     *
+     * Au moins l'un des deux champs doit être présent. Une valeur fournie est
+     * nettoyée (trim) puis doit être non vide : 255 caractères au plus pour
+     * `name`, 2 000 pour `description`. Le slug et le dossier Bunny du studio
+     * ne sont pas modifiés : les chemins `studios/{slug}/...` déjà enregistrés
+     * restent valides après un renommage.
+     *
+     * NB : les erreurs de cet endpoint sont renvoyées sous la clé `error`
+     * (et non `message` comme dans les autres contrôleurs studio).
+     *
+     * @return JsonResponse 200 studio mis à jour (`Studio::toArray()`) ; 400 si le JSON est
+     *                      invalide, si aucun champ n'est fourni ou si une valeur est vide
+     *                      ou trop longue ; 403 si l'utilisateur n'a pas de studio actif ;
+     *                      409 si le nom est déjà pris par un autre studio
+     */
     #[Route('/me', name: 'studio_me_update', methods: ['PATCH'])]
     public function update(Request $request): JsonResponse
     {
@@ -113,6 +151,8 @@ class StudioMeController extends AbstractController
             $studio->setDescription($description);
         }
 
+        // Pas de pré-contrôle du nom : c'est l'index unique `studio.name` qui
+        // détecte le doublon au flush, traduit ici en 409.
         try {
             $this->em->flush();
         } catch (UniqueConstraintViolationException $e) {

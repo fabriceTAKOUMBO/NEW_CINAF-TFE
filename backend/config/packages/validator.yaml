@@ -5,6 +5,9 @@ framework:
         #auto_mapping:
         #    App\Entity\: []
 
+# En test, la contrainte NotCompromisedPassword (qui interroge l'API
+# HaveIBeenPwned) est neutralisée pour éviter tout appel réseau. Aucune
+# entité CINAF ne l'utilise actuellement.
 when@test:
     framework:
         validation:

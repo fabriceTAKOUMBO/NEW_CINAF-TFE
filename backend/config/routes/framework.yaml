@@ -1,3 +1,4 @@
+# En dev uniquement : routes /_error/{code} pour prévisualiser les pages d'erreur.
 when@dev:
     _errors:
         resource: '@FrameworkBundle/Resources/config/routing/errors.xml'

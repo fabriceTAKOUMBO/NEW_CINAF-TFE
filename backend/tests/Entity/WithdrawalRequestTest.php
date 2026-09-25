@@ -10,9 +10,20 @@ use Symfony\Component\Uid\Uuid;
 
 /**
  * Pure unit tests for the WithdrawalRequest entity (no DB, no kernel boot).
+ *
+ * Tests unitaires de la demande de retrait, sans base ni kernel : valeurs par
+ * défaut (PENDING), cible polymorphe (type + UUID), transitions approve() /
+ * reject() et forme de toArray(). Le passage du contenu en WITHDRAWN n'est
+ * pas couvert ici : il relève de l'appelant (voir AdminWithdrawalControllerTest).
+ *
+ * Lancement : php bin/phpunit tests/Entity/WithdrawalRequestTest.php
  */
 class WithdrawalRequestTest extends TestCase
 {
+    /**
+     * Une demande neuve a un UUID, une date de création, le statut PENDING et
+     * aucune information de revue (relecteur, date, note).
+     */
     public function testConstructorInitializesDefaults(): void
     {
         $req = new WithdrawalRequest();
@@ -25,6 +36,7 @@ class WithdrawalRequestTest extends TestCase
         $this->assertNull($req->getReviewNote());
     }
 
+    /** Le type de cible (TARGET_FILM = 'film') et l'UUID du contenu visé sont conservés tels quels. */
     public function testTargetTypeAndIdAreStored(): void
     {
         $targetId = Uuid::v4();
@@ -37,6 +49,7 @@ class WithdrawalRequestTest extends TestCase
         $this->assertSame($targetId, $req->getTargetId());
     }
 
+    /** approve() avec note : PENDING → APPROVED, relecteur, date de revue et note enregistrés. */
     public function testApproveTransition(): void
     {
         $req = $this->makePending();
@@ -53,6 +66,7 @@ class WithdrawalRequestTest extends TestCase
         $this->assertSame('OK, validé par modération.', $req->getReviewNote());
     }
 
+    /** approve() sans note : statut APPROVED, relecteur et date renseignés, note null. */
     public function testApproveWithoutNote(): void
     {
         $req = $this->makePending();
@@ -66,6 +80,7 @@ class WithdrawalRequestTest extends TestCase
         $this->assertNull($req->getReviewNote());
     }
 
+    /** reject() avec note : statut REJECTED, relecteur, date de revue et note enregistrés. */
     public function testRejectTransition(): void
     {
         $req = $this->makePending();
@@ -80,6 +95,10 @@ class WithdrawalRequestTest extends TestCase
         $this->assertSame('Motif insuffisant.', $req->getReviewNote());
     }
 
+    /**
+     * toArray() d'une demande en attente visant une série : targetType 'serie',
+     * targetId en RFC 4122, statut PENDING, motif, et champs de revue à null.
+     */
     public function testToArrayShape(): void
     {
         $targetId = Uuid::v4();
@@ -101,6 +120,7 @@ class WithdrawalRequestTest extends TestCase
         $this->assertArrayHasKey('createdAt', $arr);
     }
 
+    /** Demande PENDING complète (studio et demandeur factices, cible film), non persistée. */
     private function makePending(): WithdrawalRequest
     {
         $studio = new Studio();
@@ -119,6 +139,7 @@ class WithdrawalRequestTest extends TestCase
         return $req;
     }
 
+    /** Utilisateur studio factice (ROLE_CREATEUR) à email unique, non persisté. */
     private function makeOwner(): User
     {
         $u = new User();
@@ -130,6 +151,7 @@ class WithdrawalRequestTest extends TestCase
         return $u;
     }
 
+    /** Administrateur factice (ROLE_ADMIN) à email unique, non persisté. */
     private function makeAdmin(): User
     {
         $u = new User();

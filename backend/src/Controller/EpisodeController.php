@@ -10,6 +10,17 @@ use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\Routing\Attribute\Route;
 use Symfony\Component\Security\Http\Attribute\IsGranted;
 
+/**
+ * Accès aux épisodes de série, sous le préfixe /api/episodes :
+ *  - GET /api/episodes/{id}         détail d'un épisode ;
+ *  - GET /api/episodes/{id}/stream  infos de lecture Bunny de l'épisode.
+ *
+ * Les deux endpoints exigent un utilisateur authentifié (401 sinon) et ne
+ * servent que les épisodes dont la série parente est PUBLISHED : sinon 404,
+ * comme pour un épisode inexistant (un épisode n'a pas de statut propre).
+ * Aucun contrôle d'abonnement payant n'est fait ici. Comme dans
+ * FilmController, un `{id}` qui n'est pas un UUID provoque une erreur 500.
+ */
 #[Route('/api/episodes')]
 class EpisodeController extends AbstractController
 {
@@ -20,6 +31,13 @@ class EpisodeController extends AbstractController
         private readonly string $bunnyStreamLibraryId,
     ) {}
 
+    /**
+     * Détail d'un épisode.
+     *
+     * @return JsonResponse 200 Episode::toArray() (`{id, number, title, synopsis,
+     *                      duration, bunnyVideoId}`) ; 404 `{error}` si l'épisode
+     *                      n'existe pas ou si sa série n'est pas PUBLISHED ; 401 sans jeton
+     */
     #[Route('/{id}', name: 'episode_get', methods: ['GET'])]
     #[IsGranted('IS_AUTHENTICATED_FULLY')]
     public function get(string $id): JsonResponse
@@ -31,6 +49,14 @@ class EpisodeController extends AbstractController
         return new JsonResponse($ep->toArray());
     }
 
+    /**
+     * Informations de lecture d'un épisode pour le lecteur vidéo : chemin
+     * Bunny de la vidéo et identifiant de la Bunny Stream Library.
+     *
+     * @return JsonResponse 200 `{bunnyVideoId, libraryId}` ; 404 `{error}` si
+     *                      l'épisode n'existe pas ou si sa série n'est pas
+     *                      PUBLISHED ; 401 sans jeton
+     */
     #[Route('/{id}/stream', name: 'episode_stream', methods: ['GET'])]
     #[IsGranted('IS_AUTHENTICATED_FULLY')]
     public function streamInfo(string $id): JsonResponse

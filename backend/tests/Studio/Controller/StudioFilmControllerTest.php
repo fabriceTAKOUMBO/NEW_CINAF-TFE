@@ -15,11 +15,23 @@ use Symfony\Component\HttpFoundation\Response;
  * NB : le nom de classe doit correspondre au nom de fichier (PSR-4), sinon
  * PHPUnit ne charge pas la classe (« cannot be found ») et ses tests sont
  * silencieusement ignorés. Renommé Producer→Studio le 2026-06-03.
+ *
+ * Couvre le CRUD des films côté studio, le cycle DRAFT → PUBLISHED, la demande
+ * de retrait (201 puis 409 en doublon), les refus d'accès (401 anonyme, 403 sans
+ * ROLE_CREATEUR ou sur le film d'un autre studio) et, depuis la Phase H, les
+ * règles de propriété du chemin Bunny (`bunnyVideoId`). Les studios utilisés sont
+ * déjà validés (StudioTestTrait) : la publication est donc directe.
+ *
+ * Lancement : php bin/phpunit tests/Studio/Controller/StudioFilmControllerTest.php
+ * (base de test prête, sinon `.\run-tests.ps1 -Filter StudioFilmControllerTest`).
  */
 class StudioFilmControllerTest extends ApiTestCase
 {
     use StudioTestTrait;
 
+    /**
+     * Un créateur crée un film : 201, statut DRAFT, rattaché à son propre studio.
+     */
     public function testCreatorCreatesDraftFilm(): void
     {
         $client = static::createClient();
@@ -38,6 +50,9 @@ class StudioFilmControllerTest extends ApiTestCase
         $this->assertSame('Mon Premier Film', $body['title']);
     }
 
+    /**
+     * La liste d'un créateur ne contient que les films de son studio (2 pour A, 1 pour B).
+     */
     public function testCreatorListsOnlyOwnFilms(): void
     {
         $client = static::createClient();
@@ -72,6 +87,9 @@ class StudioFilmControllerTest extends ApiTestCase
         $this->assertSame($studioB->getId()->toRfc4122(), $body['data'][0]['studioId']);
     }
 
+    /**
+     * Un créateur ne peut pas modifier le film d'un autre studio : 403.
+     */
     public function testCreatorCannotEditOtherStudioFilm403(): void
     {
         $client = static::createClient();
@@ -92,6 +110,9 @@ class StudioFilmControllerTest extends ApiTestCase
         $this->assertSame(Response::HTTP_FORBIDDEN, $resp->getStatusCode());
     }
 
+    /**
+     * Un film publié ne se supprime pas directement : 409 (il faut une demande de retrait).
+     */
     public function testCreatorCannotDeletePublishedFilm409(): void
     {
         $client = static::createClient();
@@ -114,6 +135,9 @@ class StudioFilmControllerTest extends ApiTestCase
         $this->assertSame(Response::HTTP_CONFLICT, $resp->getStatusCode());
     }
 
+    /**
+     * Studio validé : la publication fait passer le film de DRAFT à PUBLISHED et renseigne publishedAt.
+     */
     public function testCreatorPublishesOwnFilmDraftToPublished(): void
     {
         $client = static::createClient();
@@ -133,6 +157,9 @@ class StudioFilmControllerTest extends ApiTestCase
         $this->assertNotNull($body['publishedAt']);
     }
 
+    /**
+     * Publier une seconde fois un film déjà publié est refusé : 400.
+     */
     public function testCreatorPublishAlreadyPublished400(): void
     {
         $client = static::createClient();
@@ -158,6 +185,10 @@ class StudioFilmControllerTest extends ApiTestCase
         $this->assertSame(Response::HTTP_BAD_REQUEST, $client->getResponse()->getStatusCode());
     }
 
+    /**
+     * Une demande de retrait crée une WithdrawalRequest PENDING (201) liée au film et au studio.
+     * Le film est ici encore en DRAFT : l'endpoint ne contrôle pas son statut.
+     */
     public function testCreatorRequestsWithdrawalCreatesPending(): void
     {
         $client = static::createClient();
@@ -179,6 +210,9 @@ class StudioFilmControllerTest extends ApiTestCase
         $this->assertSame($studio->getId()->toRfc4122(), $body['studioId']);
     }
 
+    /**
+     * Une seconde demande de retrait alors que la première est encore PENDING : 409.
+     */
     public function testDuplicatePendingWithdrawalReturns409(): void
     {
         $client = static::createClient();
@@ -202,6 +236,9 @@ class StudioFilmControllerTest extends ApiTestCase
         $this->assertSame(Response::HTTP_CONFLICT, $resp->getStatusCode());
     }
 
+    /**
+     * Un utilisateur sans ROLE_CREATEUR n'accède pas à l'espace studio : 403.
+     */
     public function testUserWithoutRoleCreator403(): void
     {
         $client = static::createClient();
@@ -211,6 +248,9 @@ class StudioFilmControllerTest extends ApiTestCase
         $this->assertSame(Response::HTTP_FORBIDDEN, $resp->getStatusCode());
     }
 
+    /**
+     * Requête sans JWT : 401.
+     */
     public function testAnonymous401(): void
     {
         $client = static::createClient();
@@ -218,6 +258,9 @@ class StudioFilmControllerTest extends ApiTestCase
         $this->assertSame(Response::HTTP_UNAUTHORIZED, $resp->getStatusCode());
     }
 
+    /**
+     * Identifiant de film qui n'est pas un UUID : 400.
+     */
     public function testInvalidUuid400(): void
     {
         $client = static::createClient();
@@ -231,6 +274,9 @@ class StudioFilmControllerTest extends ApiTestCase
     // Phase H — Hardening : Bunny path ownership
     // -----------------------------------------------------------------------
 
+    /**
+     * Création avec un bunnyVideoId situé dans le dossier Bunny d'un autre studio : 403.
+     */
     public function testCreatorCannotSetOtherStudioBunnyPathOnCreate403(): void
     {
         $client = static::createClient();
@@ -250,6 +296,9 @@ class StudioFilmControllerTest extends ApiTestCase
         $this->assertSame(Response::HTTP_FORBIDDEN, $resp->getStatusCode());
     }
 
+    /**
+     * PATCH du bunnyVideoId vers le dossier Bunny d'un autre studio : 403.
+     */
     public function testCreatorCannotSetOtherStudioBunnyPathOnPatch403(): void
     {
         $client = static::createClient();
@@ -270,6 +319,9 @@ class StudioFilmControllerTest extends ApiTestCase
         $this->assertSame(Response::HTTP_FORBIDDEN, $resp->getStatusCode());
     }
 
+    /**
+     * Un chemin sous `studios/{slug-du-studio}/` est accepté à la création (201) comme au PATCH (200).
+     */
     public function testCreatorCanSetOwnStudioBunnyPath(): void
     {
         $client = static::createClient();
@@ -297,6 +349,10 @@ class StudioFilmControllerTest extends ApiTestCase
         $this->assertSame($newPath, $body['bunnyVideoId']);
     }
 
+    /**
+     * Le chemin Bunny d'un film importé (hors `studios/`) n'est pas modifiable côté studio : 403,
+     * même vers un chemin valide du studio.
+     */
     public function testCreatorCannotPatchImportedBunnyPath403(): void
     {
         $client = static::createClient();

@@ -25,6 +25,11 @@ use Symfony\Component\Uid\Uuid;
  *
  * Les tests qui valident le path final mockent BunnyZoneRegistry pour ne
  * pas dépendre d'un vrai bucket Bunny.
+ * Les autres attendent un refus (400, 403, 404, 413 ou 415) qui survient
+ * avant tout appel à Bunny.
+ *
+ * Lancement : php bin/phpunit tests/Studio/Controller/StudioUploadControllerTest.php
+ * (l'extension PHP GD est requise pour générer l'image de test).
  */
 class StudioUploadControllerTest extends ApiTestCase
 {
@@ -32,6 +37,10 @@ class StudioUploadControllerTest extends ApiTestCase
 
     // ─── Helpers locaux ──────────────────────────────────────
 
+    /**
+     * Génère une vraie image PNG de 1 × 1 pixel (extension GD) dans un fichier
+     * temporaire et l'emballe en UploadedFile de test (MIME image/png).
+     */
     private function smallPngFile(string $originalName = 'poster.png'): UploadedFile
     {
         $tmp = tempnam(sys_get_temp_dir(), 'cinaf_png_');
@@ -48,6 +57,9 @@ class StudioUploadControllerTest extends ApiTestCase
         );
     }
 
+    /**
+     * Génère un faux MP4 (en-tête `ftyp` minimal) annoncé en video/mp4.
+     */
     private function smallMp4File(string $originalName = 'video.mp4'): UploadedFile
     {
         // Pour le MIME : on annonce video/mp4 côté client, le controller
@@ -67,7 +79,13 @@ class StudioUploadControllerTest extends ApiTestCase
 
     /**
      * Mocke BunnyZoneRegistry pour que l'upload "réussisse" sans appel réel.
-     * Retourne le path que BunnyStorageService::uploadFile reçoit (capturé).
+     * Le faux BunnyStorageService capture le path reçu par uploadFile() et
+     * renvoie une URL factice `https://fake-cdn.test/{path}`.
+     *
+     * NB : le tableau retourné est une copie prise AVANT l'upload, sa clé
+     * `path` reste donc null ; les tests vérifient le chemin via le champ
+     * `path` de la réponse JSON. Le test est marqué « skipped » si le
+     * conteneur refuse le remplacement du service.
      */
     private function mockBunnyAndCapture(): array
     {
@@ -90,6 +108,9 @@ class StudioUploadControllerTest extends ApiTestCase
         return $captured;
     }
 
+    /**
+     * Persiste directement en base un film DRAFT du studio (slug aléatoire si non fourni).
+     */
     private function persistFilm(Studio $studio, string $slug = null): Film
     {
         /** @var EntityManagerInterface $em */
@@ -108,6 +129,9 @@ class StudioUploadControllerTest extends ApiTestCase
         return $film;
     }
 
+    /**
+     * Persiste directement en base une série DRAFT du studio (slug aléatoire si non fourni).
+     */
     private function persistSerie(Studio $studio, string $slug = null): Serie
     {
         /** @var EntityManagerInterface $em */
@@ -125,6 +149,9 @@ class StudioUploadControllerTest extends ApiTestCase
         return $serie;
     }
 
+    /**
+     * Persiste une saison et un épisode aux numéros donnés pour la série, et renvoie l'épisode.
+     */
     private function persistEpisode(Serie $serie, int $seasonNumber = 1, int $episodeNumber = 1): Episode
     {
         /** @var EntityManagerInterface $em */
@@ -147,6 +174,9 @@ class StudioUploadControllerTest extends ApiTestCase
 
     // ─── Validation du payload ───────────────────────────────
 
+    /**
+     * Payload sans `targetType` : 400.
+     */
     public function testUploadMissingTargetTypeReturns400(): void
     {
         $client = static::createClient();
@@ -163,6 +193,9 @@ class StudioUploadControllerTest extends ApiTestCase
         $this->assertSame(Response::HTTP_BAD_REQUEST, $client->getResponse()->getStatusCode());
     }
 
+    /**
+     * `purpose` hors liste (ici `subtitles`) : 400.
+     */
     public function testUploadInvalidPurposeReturns400(): void
     {
         $client = static::createClient();
@@ -180,6 +213,9 @@ class StudioUploadControllerTest extends ApiTestCase
         $this->assertSame(Response::HTTP_BAD_REQUEST, $client->getResponse()->getStatusCode());
     }
 
+    /**
+     * `targetId` qui n'est pas un UUID : 400.
+     */
     public function testUploadInvalidUuidReturns400(): void
     {
         $client = static::createClient();
@@ -196,6 +232,9 @@ class StudioUploadControllerTest extends ApiTestCase
         $this->assertSame(Response::HTTP_BAD_REQUEST, $client->getResponse()->getStatusCode());
     }
 
+    /**
+     * UUID valide mais aucun film correspondant : 404.
+     */
     public function testUploadFilmNotFoundReturns404(): void
     {
         $client = static::createClient();
@@ -218,6 +257,10 @@ class StudioUploadControllerTest extends ApiTestCase
 
     // ─── Validation MIME / extension ─────────────────────────
 
+    /**
+     * Un exécutable (`malware.exe`) envoyé comme vidéo est rejeté par les listes
+     * blanches MIME / extension : 415.
+     */
     public function testUploadExtensionForgedReturns415(): void
     {
         $client = static::createClient();
@@ -244,6 +287,9 @@ class StudioUploadControllerTest extends ApiTestCase
         $this->assertSame(Response::HTTP_UNSUPPORTED_MEDIA_TYPE, $client->getResponse()->getStatusCode());
     }
 
+    /**
+     * Un fichier vidéo envoyé comme affiche (purpose=poster) : 415.
+     */
     public function testUploadPurposeMimeMismatchReturns415(): void
     {
         // purpose=poster + MIME video → 415
@@ -262,6 +308,9 @@ class StudioUploadControllerTest extends ApiTestCase
         $this->assertSame(Response::HTTP_UNSUPPORTED_MEDIA_TYPE, $client->getResponse()->getStatusCode());
     }
 
+    /**
+     * Image de 11 Mo, au-delà de la limite de 10 Mo : 413.
+     */
     public function testUploadImageTooLargeReturns413(): void
     {
         $client = static::createClient();
@@ -291,6 +340,9 @@ class StudioUploadControllerTest extends ApiTestCase
 
     // ─── Ownership ────────────────────────────────────────────
 
+    /**
+     * Upload vers le film d'un autre studio : 403.
+     */
     public function testUploadOtherStudioFilmReturns403(): void
     {
         $client = static::createClient();
@@ -313,6 +365,9 @@ class StudioUploadControllerTest extends ApiTestCase
         $this->assertSame(Response::HTTP_FORBIDDEN, $client->getResponse()->getStatusCode());
     }
 
+    /**
+     * Upload vers l'épisode d'un autre studio (propriété vérifiée via sa série) : 403.
+     */
     public function testUploadEpisodeOtherSerieReturns403(): void
     {
         // L'épisode appartient à un autre studio (cascade ownership)
@@ -339,6 +394,9 @@ class StudioUploadControllerTest extends ApiTestCase
 
     // ─── Combinaisons non supportées ─────────────────────────
 
+    /**
+     * Affiche pour un épisode (seul purpose=video est supporté) : 400.
+     */
     public function testUploadEpisodePosterReturns400(): void
     {
         $client = static::createClient();
@@ -363,6 +421,9 @@ class StudioUploadControllerTest extends ApiTestCase
 
     // ─── Construction du path (le cœur du refactor) ──────────
 
+    /**
+     * Affiche de film rangée sous `studios/{studio}/{film}/poster.png` (201, Bunny simulé).
+     */
     public function testUploadFilmPosterBuildsExpectedPath(): void
     {
         $client = static::createClient();
@@ -388,6 +449,9 @@ class StudioUploadControllerTest extends ApiTestCase
         $this->assertSame($expected, $body['path']);
     }
 
+    /**
+     * Vidéo de film rangée sous `studios/{studio}/{film}/video.mp4` (201, Bunny simulé).
+     */
     public function testUploadFilmVideoBuildsExpectedPath(): void
     {
         $client = static::createClient();
@@ -413,6 +477,9 @@ class StudioUploadControllerTest extends ApiTestCase
         $this->assertSame($expected, $body['path']);
     }
 
+    /**
+     * Affiche de série rangée sous `studios/{studio}/{serie}/poster.png` (201, Bunny simulé).
+     */
     public function testUploadSeriePosterBuildsExpectedPath(): void
     {
         $client = static::createClient();
@@ -438,6 +505,10 @@ class StudioUploadControllerTest extends ApiTestCase
         $this->assertSame($expected, $body['path']);
     }
 
+    /**
+     * Vidéo d'épisode rangée sous `studios/{studio}/{serie}/saison-1/episode-07/video.mp4`
+     * (numéro d'épisode sur deux chiffres ; 201, Bunny simulé).
+     */
     public function testUploadEpisodeVideoBuildsExpectedPath(): void
     {
         $client = static::createClient();
@@ -464,6 +535,9 @@ class StudioUploadControllerTest extends ApiTestCase
         $this->assertSame($expected, $body['path']);
     }
 
+    /**
+     * Requête multipart sans champ `file` : 400.
+     */
     public function testUploadNoFileReturns400(): void
     {
         $client = static::createClient();

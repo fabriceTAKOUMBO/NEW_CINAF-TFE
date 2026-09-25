@@ -1,13 +1,23 @@
+# API Platform. Aucune entité n'est exposée comme ressource API Platform
+# (#[ApiResource]) : tous les endpoints CINAF sont des contrôleurs Symfony.
+# Le bundle sert à produire la documentation OpenAPI et la page Swagger UI
+# (GET /api), complétées par les décorateurs App\OpenApi (cf. services.yaml).
 api_platform:
     title: 'CINAF API'
     version: '2.0.0'
+    # Formats de contenu gérés par API Platform : JSON simple et JSON-LD (Hydra).
     formats:
         json: ['application/json']
         jsonld: ['application/ld+json']
+    # Formats de la documentation : spécification OpenAPI en JSON et page HTML
+    # (Swagger UI, rendue par Twig).
     docs_formats:
         jsonopenapi: ['application/vnd.openapi+json']
         html: ['text/html']
     defaults:
+        # Pas de session : l'API s'authentifie par JWT (cf. security.yaml).
         stateless: true
         cache_headers:
+            # Le contenu d'une réponse dépend du format demandé, de l'utilisateur
+            # authentifié et de l'origine CORS : les caches HTTP doivent en tenir compte.
             vary: ['Content-Type', 'Authorization', 'Origin']

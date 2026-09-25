@@ -11,11 +11,17 @@ use Stripe\Exception\SignatureVerificationException;
  * Pas de container Symfony, pas de DB : on instancie directement le service
  * avec les bons paramètres et on valide les garde-fous + la vérification
  * de signature webhook (l'algorithme est reproductible en local).
+ *
+ * Aucun appel réseau : seules les méthodes qui ne contactent pas l'API Stripe
+ * sont exercées (la vérification de signature est locale).
+ * Lancement : `php bin/phpunit tests/Service/StripeServiceTest.php`.
  */
 final class StripeServiceTest extends TestCase
 {
+    /** Secret de webhook factice, utilisé à la fois pour signer et pour vérifier. */
     private const WEBHOOK_SECRET = 'whsec_test_dummy';
 
+    /** isEnabled() renvoie exactement le drapeau STRIPE_ENABLED passé au constructeur. */
     public function testIsEnabledReflectsConstructorFlag(): void
     {
         $disabled = new StripeService('sk_test', self::WEBHOOK_SECRET, 'http://success', 'http://cancel', false);
@@ -25,6 +31,7 @@ final class StripeServiceTest extends TestCase
         $this->assertTrue($enabled->isEnabled());
     }
 
+    /** Stripe désactivé : vérifier un webhook lève une LogicException (garde-fou assertEnabled()). */
     public function testConstructWebhookEventThrowsWhenDisabled(): void
     {
         $svc = new StripeService('sk_test', self::WEBHOOK_SECRET, 'http://success', 'http://cancel', false);
@@ -35,6 +42,7 @@ final class StripeServiceTest extends TestCase
         $svc->constructWebhookEvent('{}', 't=0,v1=fake');
     }
 
+    /** Une signature fausse est rejetée par SignatureVerificationException. */
     public function testConstructWebhookEventRejectsInvalidSignature(): void
     {
         $svc = new StripeService('sk_test', self::WEBHOOK_SECRET, 'http://success', 'http://cancel', true);
@@ -45,6 +53,7 @@ final class StripeServiceTest extends TestCase
         $svc->constructWebhookEvent('{"id":"evt_1","type":"foo"}', 't=1234,v1=invalidsignature');
     }
 
+    /** Un payload signé avec le bon secret est accepté et converti en \Stripe\Event (id et type conservés). */
     public function testConstructWebhookEventAcceptsValidSignature(): void
     {
         $svc = new StripeService('sk_test', self::WEBHOOK_SECRET, 'http://success', 'http://cancel', true);
@@ -66,6 +75,9 @@ final class StripeServiceTest extends TestCase
     /**
      * Reproduit l'algorithme de signature Stripe pour les tests.
      * Cf. https://stripe.com/docs/webhooks/signatures#verify-manually
+     *
+     * En-tête produit : `t={timestamp},v1={HMAC-SHA256("{timestamp}.{payload}", secret)}`.
+     * Horodatage par défaut = maintenant, pour rester dans la tolérance de 300 s.
      */
     public static function signPayload(string $payload, string $secret, ?int $timestamp = null): string
     {

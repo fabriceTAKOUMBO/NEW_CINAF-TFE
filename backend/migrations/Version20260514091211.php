@@ -18,6 +18,9 @@ use Doctrine\Migrations\AbstractMigration;
  * BACKEND_MEMORY : l'entité de gesdinet est un mapped-superclass XML non détecté).
  * Les changements parasites sur `studio_id` (NOT NULL → NULL) et `uniq_withdrawal_pending`
  * ont également été écartés car non liés à la suppression de isPremium.
+ *
+ * Retour arrière : down() recrée les colonnes à `false` pour toutes les lignes,
+ * l'ancienne valeur premium n'est pas restaurée.
  */
 final class Version20260514091211 extends AbstractMigration
 {

@@ -47,6 +47,18 @@ class StudioOnboardingController extends AbstractController
     ) {
     }
 
+    /**
+     * Crée le studio de l'utilisateur connecté et lui attribue ROLE_CREATEUR.
+     *
+     * Corps JSON : `name` et `description`, obligatoires et non vides après trim.
+     * Le slug est dérivé du nom (rendu unique si besoin) et détermine le dossier
+     * Bunny du studio, `studios/{slug}/`, sous lequel seront rangés tous ses uploads.
+     *
+     * @return JsonResponse 201 studio créé (`Studio::toArray()`, `isValidated` à false) ;
+     *                      400 si le JSON est invalide ou si `name`/`description` est vide ;
+     *                      403 si l'appelant est administrateur ; 409 s'il possède déjà
+     *                      un studio ou si le nom est déjà pris
+     */
     #[Route('', name: 'studio_onboarding_create', methods: ['POST'])]
     public function create(Request $request): JsonResponse
     {
@@ -95,6 +107,9 @@ class StudioOnboardingController extends AbstractController
             );
         }
 
+        // Slug dérivé du nom. Il peut être vide si le nom ne contient aucun
+        // caractère translittérable (ponctuation, emoji...) : on retombe alors
+        // sur un slug générique `studio-` + 6 caractères hexadécimaux aléatoires.
         $baseSlug = $this->slugger->slug($name)->lower()->toString();
         if ($baseSlug === '') {
             $baseSlug = 'studio-' . bin2hex(random_bytes(3));
@@ -106,11 +121,18 @@ class StudioOnboardingController extends AbstractController
         $studio->setSlug($slug);
         $studio->setDescription($description);
         $studio->setOwner($user);
+        // Même préfixe que celui exigé par StudioOwnershipChecker::assertBunnyPathOwnership()
+        // et produit par BunnyPathBuilder : `studios/{slug}/`.
         $studio->setBunnyFolder(sprintf('studios/%s/', $slug));
         $studio->setIsActive(true);
+        // Studio non validé : son premier contenu publié passera en
+        // PENDING_APPROVAL (ContentLifecycleService::publishFilm/publishSerie).
         $studio->setIsValidated(false);
 
         // Ajoute ROLE_CREATEUR sans en perdre les éventuels rôles existants.
+        // Le rôle est effectif dès la requête suivante, même avec le JWT déjà
+        // émis : le pare-feu recharge l'utilisateur (et donc ses rôles) depuis
+        // la base à chaque requête.
         $roles = $user->getRoles();
         if (!\in_array('ROLE_CREATEUR', $roles, true)) {
             $roles[] = 'ROLE_CREATEUR';
@@ -137,6 +159,14 @@ class StudioOnboardingController extends AbstractController
 
     /**
      * Génère un slug unique en suffixant aléatoirement si collision.
+     *
+     * Jusqu'à 5 essais avec un suffixe de 5 caractères hexadécimaux, puis un
+     * dernier suffixe de 8 caractères renvoyé sans vérification. L'index unique
+     * `studio.slug` reste le filet de sécurité (409 au flush dans create()).
+     *
+     * @param string $base slug dérivé du nom du studio
+     *
+     * @return string slug libre au moment de la vérification
      */
     private function generateUniqueSlug(string $base): string
     {

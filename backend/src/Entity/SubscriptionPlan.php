@@ -5,6 +5,15 @@ use App\Repository\SubscriptionPlanRepository;
 use Doctrine\ORM\Mapping as ORM;
 use Symfony\Component\Uid\Uuid;
 
+/**
+ * Formule d'abonnement payant proposée à la vente (Mensuel 9,99 €, Annuel
+ * 99 € dans les fixtures), listée publiquement par GET /api/subscription-plans
+ * (formules actives uniquement, triées par prix croissant).
+ *
+ * Créée par SubscriptionPlanFixtures ou par insertion SQL au déploiement
+ * (DEPLOY.md). `stripePriceId` la relie au prix Stripe à facturer. Le prix
+ * est stocké en centimes (entier) pour éviter les erreurs d'arrondi.
+ */
 #[ORM\Entity(repositoryClass: SubscriptionPlanRepository::class)]
 #[ORM\Table(name: 'subscription_plan')]
 #[ORM\HasLifecycleCallbacks]
@@ -17,6 +26,7 @@ class SubscriptionPlan
     #[ORM\Column(type: 'uuid', unique: true)]
     private Uuid $id;
 
+    /** Nom commercial affiché (sert aussi de clé d'idempotence aux fixtures). */
     #[ORM\Column(length: 100)]
     private string $name;
 
@@ -34,6 +44,10 @@ class SubscriptionPlan
     #[ORM\Column(length: 10)]
     private string $intervalUnit = self::INTERVAL_MONTH;
 
+    /**
+     * Nombre d'unités par période (1 = chaque mois / chaque année) ; utilisé
+     * par SubscriptionService pour calculer `endsAt` (minimum 1).
+     */
     #[ORM\Column(type: 'integer')]
     private int $intervalCount = 1;
 
@@ -41,16 +55,23 @@ class SubscriptionPlan
     #[ORM\Column(type: 'json')]
     private array $features = [];
 
+    /** Formule en vente ; inactive, elle est masquée de la liste publique et refusée à la souscription (400). */
     #[ORM\Column(options: ['default' => true])]
     private bool $isActive = true;
 
-    /** ID Stripe pour migration future ; null tant qu'on est en mode mock. */
+    /**
+     * ID du prix Stripe (`price_...`) utilisé par StripeService pour créer la
+     * session Checkout ; renseigné par les fixtures (variables STRIPE_PRICE_*)
+     * ou par `app:stripe:sync-plans`. Null en mode simulé : si Stripe est
+     * activé, souscrire à un plan sans ID renvoie 400.
+     */
     #[ORM\Column(length: 100, nullable: true)]
     private ?string $stripePriceId = null;
 
     #[ORM\Column]
     private \DateTimeImmutable $createdAt;
 
+    /** Mis à jour automatiquement à chaque modification (callback onPreUpdate). */
     #[ORM\Column]
     private \DateTimeImmutable $updatedAt;
 
@@ -61,6 +82,7 @@ class SubscriptionPlan
         $this->updatedAt = new \DateTimeImmutable();
     }
 
+    /** Callback Doctrine (PreUpdate) : horodate chaque modification persistée. */
     #[ORM\PreUpdate]
     public function onPreUpdate(): void
     {
@@ -91,16 +113,27 @@ class SubscriptionPlan
     public function getCreatedAt(): \DateTimeImmutable { return $this->createdAt; }
     public function getUpdatedAt(): \DateTimeImmutable { return $this->updatedAt; }
 
+    /** Prix lisible au format français (virgule décimale, espace des milliers), ex. « 9,99 EUR ». */
     public function getFormattedPrice(): string
     {
         return number_format($this->priceCents / 100, 2, ',', ' ') . ' ' . $this->currency;
     }
 
+    /** Périodicité normalisée pour le frontend : 'year' pour un plan annuel, 'month' dans tous les autres cas. */
     public function getBillingInterval(): string
     {
         return $this->intervalUnit === self::INTERVAL_YEAR ? 'year' : 'month';
     }
 
+    /**
+     * Sérialise la formule pour l'API publique : id, name, description,
+     * priceCents, price (en unités monétaires), formattedPrice, currency,
+     * intervalUnit, intervalCount, billingInterval, features, isActive, et
+     * `trialDays`, toujours 0 (aucune période d'essai n'est gérée).
+     * `stripePriceId` n'est pas exposé.
+     *
+     * @return array<string, mixed>
+     */
     public function toArray(): array
     {
         return [

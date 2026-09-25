@@ -17,6 +17,26 @@ use Symfony\Component\Security\Http\Attribute\IsGranted;
 use Symfony\Component\String\Slugger\SluggerInterface;
 use Symfony\Component\Uid\Uuid;
 
+/**
+ * Gestion des films d'un studio depuis l'espace studio (préfixe `/api/studio/films`).
+ *
+ * Accès : ROLE_CREATEUR, exigé deux fois (attribut `#[IsGranted]` ci-dessous et
+ * règle `access_control` `^/api/studio` de security.yaml). Un utilisateur ne
+ * manipule que les films du studio actif qu'il possède : la propriété est
+ * vérifiée par StudioOwnershipChecker, qui lève une 403 dans le cas contraire.
+ *
+ * Endpoints :
+ *  - GET    ''              liste paginée des films du studio (filtre `status` optionnel)
+ *  - GET    /{id}           détail d'un film
+ *  - POST   ''              création d'un film, toujours en DRAFT
+ *  - PATCH  /{id}           modification partielle (refusée en PENDING_APPROVAL)
+ *  - DELETE /{id}           suppression, possible uniquement en DRAFT
+ *  - POST   /{id}/publish   publication (PUBLISHED, ou PENDING_APPROVAL si le studio n'est pas validé)
+ *  - POST   /{id}/withdraw  demande de retrait adressée à l'admin (WithdrawalRequest)
+ *
+ * Les changements de statut passent par ContentLifecycleService, jamais en
+ * ligne dans ce contrôleur.
+ */
 #[Route('/api/studio/films')]
 #[IsGranted('ROLE_CREATEUR')]
 class StudioFilmController extends AbstractController
@@ -30,11 +50,23 @@ class StudioFilmController extends AbstractController
     ) {
     }
 
+    /**
+     * Liste paginée des films du studio de l'utilisateur, du plus récent au plus ancien.
+     *
+     * Paramètres de requête : `page` (défaut 1), `limit` (défaut 30, borné entre 1 et 100)
+     * et `status` optionnel (DRAFT, PUBLISHED, WITHDRAWN ou PENDING_APPROVAL).
+     *
+     * @return JsonResponse 200 `{data, total, page, limit}`, chaque film au format
+     *                      détaillé `Film::toArray(true)` ; 400 si `status` est inconnu ;
+     *                      403 si l'utilisateur n'a pas de studio actif
+     */
     #[Route('', name: 'studio_films_list', methods: ['GET'])]
     public function list(Request $request): JsonResponse
     {
         /** @var User $user */
         $user = $this->getUser();
+        // Le studio vient toujours de l'utilisateur connecté, jamais d'un paramètre :
+        // impossible de lister les films d'un autre studio.
         $studio = $this->ownershipChecker->getStudioForUser($user);
 
         $page = max(1, (int) $request->query->get('page', 1));
@@ -61,6 +93,13 @@ class StudioFilmController extends AbstractController
         ]);
     }
 
+    /**
+     * Détail d'un film du studio.
+     *
+     * @return JsonResponse 200 film (`Film::toArray(true)`) ; 400 si `id` n'est pas un UUID ;
+     *                      404 si le film n'existe pas ; 403 s'il n'appartient pas
+     *                      au studio actif de l'utilisateur
+     */
     #[Route('/{id}', name: 'studio_films_get', methods: ['GET'])]
     public function get(string $id): JsonResponse
     {
@@ -75,6 +114,18 @@ class StudioFilmController extends AbstractController
         return new JsonResponse($film->toArray(true));
     }
 
+    /**
+     * Crée un film en DRAFT, rattaché au studio de l'utilisateur.
+     *
+     * Corps JSON : `title`, `synopsis`, `year` et `duration` (en minutes) obligatoires ;
+     * `slug` et `bunnyVideoId` facultatifs. Le film reste invisible du public
+     * tant qu'il n'est pas publié.
+     *
+     * @return JsonResponse 201 film créé (`Film::toArray(true)`) ; 400 si le JSON est
+     *                      invalide ou si un champ obligatoire manque ; 403 si
+     *                      l'utilisateur n'a pas de studio actif ou si `bunnyVideoId`
+     *                      pointe hors de `studios/{slug-du-studio}/`
+     */
     #[Route('', name: 'studio_films_create', methods: ['POST'])]
     public function create(Request $request): JsonResponse
     {
@@ -102,6 +153,10 @@ class StudioFilmController extends AbstractController
         }
 
         $title = (string) $data['title'];
+        // Slug fourni par le client, sinon dérivé du titre avec un suffixe
+        // aléatoire de 6 caractères hexadécimaux : deux films homonymes
+        // obtiennent ainsi des slugs distincts (le slug est unique en base et
+        // sert de nom de dossier Bunny du projet).
         $slug = isset($data['slug']) && $data['slug'] !== ''
             ? (string) $data['slug']
             : $this->slugger->slug($title)->lower() . '-' . substr(bin2hex(random_bytes(4)), 0, 6);
@@ -124,6 +179,20 @@ class StudioFilmController extends AbstractController
         return new JsonResponse($film->toArray(true), 201);
     }
 
+    /**
+     * Modifie partiellement un film du studio : seuls les champs présents dans
+     * le corps JSON sont appliqués, les clés inconnues sont ignorées.
+     *
+     * Champs acceptés : `title`, `synopsis`, `year`, `duration` (une valeur null
+     * y est ignorée) ; `poster` et `trailerVideoId` (null efface la valeur) ;
+     * `bunnyVideoId`, soumis aux règles de propriété du chemin Bunny (Phase H).
+     *
+     * @return JsonResponse 200 film modifié ; 400 si `id` n'est pas un UUID ou si le
+     *                      JSON est invalide ; 403 si le film n'appartient pas au studio,
+     *                      si son chemin Bunny actuel provient de l'import ou si le
+     *                      nouveau chemin sort de `studios/{slug-du-studio}/` ;
+     *                      404 si le film n'existe pas ; 409 s'il est en PENDING_APPROVAL
+     */
     #[Route('/{id}', name: 'studio_films_patch', methods: ['PATCH'])]
     public function patch(string $id, Request $request): JsonResponse
     {
@@ -137,6 +206,7 @@ class StudioFilmController extends AbstractController
 
         // Un contenu en attente d'approbation est gelé côté studio :
         // l'admin doit d'abord refuser pour repasser en DRAFT.
+        // Seul cet état est gelé : un film DRAFT, PUBLISHED ou WITHDRAWN reste modifiable.
         if ($film->getStatus() === Film::STATUS_PENDING_APPROVAL) {
             return new JsonResponse(
                 ['message' => "Contenu en attente d'approbation : modification impossible."],
@@ -182,6 +252,18 @@ class StudioFilmController extends AbstractController
         return new JsonResponse($film->toArray(true));
     }
 
+    /**
+     * Supprime définitivement un film, uniquement s'il est encore en DRAFT.
+     * Les fichiers déjà envoyés sur Bunny ne sont pas supprimés.
+     *
+     * Dans tout autre statut (PENDING_APPROVAL, PUBLISHED, WITHDRAWN), la réponse
+     * est 409 : un contenu publié ne disparaît du catalogue que par une demande
+     * de retrait validée par un administrateur.
+     *
+     * @return Response 204 sans contenu ; 400 si `id` n'est pas un UUID ; 403 si le film
+     *                  n'appartient pas au studio ; 404 s'il n'existe pas ;
+     *                  409 s'il n'est pas en DRAFT
+     */
     #[Route('/{id}', name: 'studio_films_delete', methods: ['DELETE'])]
     public function delete(string $id): Response
     {
@@ -205,6 +287,17 @@ class StudioFilmController extends AbstractController
         return new Response('', 204);
     }
 
+    /**
+     * Publie un film en DRAFT (transition déléguée à ContentLifecycleService::publishFilm()).
+     *
+     * Le film passe en PUBLISHED si le studio est déjà validé ; sinon (premier
+     * contenu d'un studio créé en self-service) il passe en PENDING_APPROVAL et
+     * attend l'approbation d'un administrateur.
+     *
+     * @return JsonResponse 200 film avec son nouveau statut ; 400 si le film n'est pas
+     *                      en DRAFT ou si `id` n'est pas un UUID ; 403 si le film
+     *                      n'appartient pas au studio ; 404 s'il n'existe pas
+     */
     #[Route('/{id}/publish', name: 'studio_films_publish', methods: ['POST'])]
     public function publish(string $id): JsonResponse
     {
@@ -221,6 +314,19 @@ class StudioFilmController extends AbstractController
         return new JsonResponse($film->toArray(true));
     }
 
+    /**
+     * Demande le retrait d'un film : crée une WithdrawalRequest en PENDING que
+     * l'admin approuvera (le film passe alors en WITHDRAWN) ou rejettera.
+     *
+     * Corps JSON : `reason` obligatoire (non vide). Le statut du film n'est pas
+     * contrôlé ici ; seule l'unicité d'une demande PENDING par contenu est imposée
+     * (ContentLifecycleService::requestWithdrawal()).
+     *
+     * @return JsonResponse 201 demande créée (`WithdrawalRequest::toArray()`) ; 400 si
+     *                      `reason` manque ou si `id` n'est pas un UUID ; 403 si le film
+     *                      n'appartient pas au studio ; 404 s'il n'existe pas ;
+     *                      409 si une demande de retrait est déjà en attente
+     */
     #[Route('/{id}/withdraw', name: 'studio_films_withdraw', methods: ['POST'])]
     public function withdraw(string $id, Request $request): JsonResponse
     {
@@ -251,7 +357,11 @@ class StudioFilmController extends AbstractController
 
     /**
      * Résout un film par UUID et vérifie l'ownership. Retourne soit Film,
-     * soit une JsonResponse d'erreur (400 invalid uuid, 404 not found, 403 not owner).
+     * soit une JsonResponse d'erreur (400 invalid uuid, 404 not found).
+     * Le cas « non-propriétaire » n'est pas renvoyé mais levé : assertOwnsFilm()
+     * lance une AccessDeniedHttpException, que Symfony convertit en 403.
+     *
+     * @throws \Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException
      */
     private function resolveFilmForUser(string $id, User $user): Film|JsonResponse
     {

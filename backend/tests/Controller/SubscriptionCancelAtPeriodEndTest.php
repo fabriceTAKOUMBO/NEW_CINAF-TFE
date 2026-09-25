@@ -22,9 +22,15 @@ use Symfony\Component\Uid\Uuid;
  * dans le contrôleur HTTP. Le test « Stripe est appelé avec cancel_at_period_end »
  * instancie le contrôleur directement avec un mock + flag activé, pour vérifier
  * la primitive Stripe sans toucher au container global.
+ *
+ * Lancement : `php bin/phpunit tests/Controller/SubscriptionCancelAtPeriodEndTest.php`.
  */
 final class SubscriptionCancelAtPeriodEndTest extends ApiTestCase
 {
+    /**
+     * Résiliation via l'API : statut ACTIVE conservé, canceledAt renseigné, endsAt
+     * futur préservé (l'accès continue) ; la réponse 200 reflète cet état.
+     */
     public function testCancelKeepsStatusActiveAndFillsCanceledAt(): void
     {
         $client = static::createClient();
@@ -55,6 +61,11 @@ final class SubscriptionCancelAtPeriodEndTest extends ApiTestCase
         $this->assertNotNull($body['subscription']['canceledAt']);
     }
 
+    /**
+     * Mode Stripe simulé par un mock : pour un abonnement lié à Stripe,
+     * StripeService::cancelAtPeriodEnd() est appelé une seule fois avec son
+     * stripeSubscriptionId, et le contrôleur répond 200.
+     */
     public function testCancelCallsStripeWithCancelAtPeriodEndTrue(): void
     {
         // STRIPE_ENABLED=false en env test → on ne peut pas tester le passage par
@@ -101,6 +112,7 @@ final class SubscriptionCancelAtPeriodEndTest extends ApiTestCase
         $this->assertSame(Response::HTTP_OK, $response->getStatusCode());
     }
 
+    /** Utilisateur sans abonnement actif → 404. */
     public function testCancelReturns404IfNoActiveSubscription(): void
     {
         $client = static::createClient();
@@ -118,6 +130,9 @@ final class SubscriptionCancelAtPeriodEndTest extends ApiTestCase
     // ----------------------------------------------------------------
 
     /**
+     * Persiste un utilisateur ROLE_USER (email unique) et forge son JWT sans passer
+     * par `/api/auth/login`.
+     *
      * @return array{0:User,1:string}
      */
     private function createUserWithToken(EntityManagerInterface $em): array
@@ -140,6 +155,7 @@ final class SubscriptionCancelAtPeriodEndTest extends ApiTestCase
         return [$user, $jwt->create($user)];
     }
 
+    /** Persiste un plan mensuel actif au nom unique, sans stripePriceId. */
     private function seedPlan(EntityManagerInterface $em): SubscriptionPlan
     {
         $plan = new SubscriptionPlan();
@@ -155,6 +171,10 @@ final class SubscriptionCancelAtPeriodEndTest extends ApiTestCase
         return $plan;
     }
 
+    /**
+     * Persiste un abonnement ACTIVE commencé il y a 2 jours et finissant dans
+     * `$endsInDays` jours, sans lien Stripe (comme en mode simulé).
+     */
     private function seedActiveSubscription(
         EntityManagerInterface $em,
         User $user,

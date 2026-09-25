@@ -7,6 +7,14 @@ use Doctrine\Common\Collections\Collection;
 use Doctrine\ORM\Mapping as ORM;
 use Symfony\Component\Uid\Uuid;
 
+/**
+ * Genre cinématographique (référentiel), rattaché aux films et séries.
+ *
+ * Exposé en lecture par GET /api/genres ; aucun endpoint ni fixture ne crée
+ * de genre dans le code actuel. Côté inverse des ManyToMany `film_genre` /
+ * `serie_genre`, portées par Film et Serie. Nom et slug sont uniques : les
+ * filtres `genre` des recherches acceptent l'un ou l'autre.
+ */
 #[ORM\Entity(repositoryClass: GenreRepository::class)]
 #[ORM\Table(name: 'genre')]
 #[ORM\HasLifecycleCallbacks]
@@ -25,12 +33,15 @@ class Genre
     #[ORM\Column]
     private \DateTimeImmutable $createdAt;
 
+    /** Mis à jour automatiquement à chaque modification (callback onPreUpdate). */
     #[ORM\Column]
     private \DateTimeImmutable $updatedAt;
 
+    /** Côté inverse (relation portée par Film::$genres). */
     #[ORM\ManyToMany(targetEntity: Film::class, mappedBy: 'genres')]
     private Collection $films;
 
+    /** Côté inverse (relation portée par Serie::$genres). */
     #[ORM\ManyToMany(targetEntity: Serie::class, mappedBy: 'genres')]
     private Collection $series;
 
@@ -43,6 +54,7 @@ class Genre
         $this->series = new ArrayCollection();
     }
 
+    /** Callback Doctrine (PreUpdate) : horodate chaque modification persistée. */
     #[ORM\PreUpdate]
     public function onPreUpdate(): void
     {
@@ -59,6 +71,11 @@ class Genre
     public function getFilms(): Collection { return $this->films; }
     public function getSeries(): Collection { return $this->series; }
 
+    /**
+     * Sérialise le genre : id, name, slug.
+     *
+     * @return array<string, mixed>
+     */
     public function toArray(): array
     {
         return [

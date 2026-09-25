@@ -26,6 +26,16 @@ use Symfony\Component\Uid\Uuid;
  * createClient() / createAuthenticatedClient() AVANT tout accès à
  * static::getContainer() (les deux bootent le kernel, et WebTestCase
  * interdit de booter le kernel deux fois).
+ *
+ * En français : classe mère des tests fonctionnels de l'API. Elle fournit
+ * des requêtes JSON authentifiées par JWT (`Authorization: Bearer ...`), la
+ * création d'utilisateurs avec leur jeton, des « seeders » d'entités (studio,
+ * film, série, épisode) et des assertions sur les réponses JSON.
+ *
+ * Les tests écrivent dans la vraie base de test, sans rollback entre deux
+ * tests : les helpers génèrent donc des emails, noms et slugs uniques
+ * (suffixes aléatoires) pour éviter les collisions. La base est recréée puis
+ * migrée, sans fixtures, par `.\run-tests.ps1`.
  */
 abstract class ApiTestCase extends WebTestCase
 {
@@ -35,6 +45,9 @@ abstract class ApiTestCase extends WebTestCase
 
     /**
      * POST JSON to an endpoint.
+     *
+     * Envoie `$payload` encodé en JSON ; avec `$token`, ajoute l'en-tête
+     * `Authorization: Bearer {token}`. Renvoie la réponse obtenue.
      */
     protected function postJson(
         KernelBrowser $client,
@@ -54,6 +67,8 @@ abstract class ApiTestCase extends WebTestCase
 
     /**
      * GET JSON from an endpoint.
+     *
+     * Requête anonyme si `$token` est null (utile pour tester les 401).
      */
     protected function getJson(
         KernelBrowser $client,
@@ -72,6 +87,8 @@ abstract class ApiTestCase extends WebTestCase
 
     /**
      * PATCH JSON to an endpoint (uses application/merge-patch+json as per RFC 7396).
+     *
+     * Même Content-Type que le frontend (`lib/api.ts`) ; jeton obligatoire.
      */
     protected function patchJson(
         KernelBrowser $client,
@@ -92,6 +109,8 @@ abstract class ApiTestCase extends WebTestCase
 
     /**
      * DELETE an endpoint (requires auth).
+     *
+     * Envoie un DELETE authentifié, sans corps ; renvoie la réponse (souvent 204).
      */
     protected function deleteJson(
         KernelBrowser $client,
@@ -114,6 +133,12 @@ abstract class ApiTestCase extends WebTestCase
 
     /**
      * Create a user in the test DB and return a JWT token for that user.
+     *
+     * Démarre le client HTTP (donc le kernel), persiste un utilisateur vérifié
+     * portant le rôle demandé (mot de passe `Password123!`, email unique par
+     * défaut) et forge son JWT directement avec JWTTokenManager, sans passer par
+     * `/api/auth/login`. Tout rôle stocké peut être passé (ex. ROLE_CREATEUR),
+     * mais aucun studio n'est alors créé : voir StudioTestTrait pour ce cas.
      *
      * @param string $role  One of 'ROLE_USER' | 'ROLE_ADMIN'
      * @param string $email Override the generated email (optional)
@@ -170,6 +195,10 @@ abstract class ApiTestCase extends WebTestCase
      * Required because film.studio_id / serie.studio_id are NOT NULL in the
      * current schema (Phase F). Each call creates a fresh owner + studio with
      * unique name / slug / bunnyFolder.
+     *
+     * Le propriétaire (ROLE_CREATEUR) reçoit un mot de passe non haché : il ne
+     * peut pas se connecter, il sert seulement de propriétaire. Le studio est
+     * créé actif et déjà validé (publication directe en PUBLISHED).
      */
     protected function seedStudio(EntityManagerInterface $em): Studio
     {
@@ -201,6 +230,9 @@ abstract class ApiTestCase extends WebTestCase
      * Create and persist a valid PUBLISHED film (with its owning studio) in the
      * test DB.
      *
+     * Chaque champ a une valeur par défaut valide, remplaçable via `$overrides` ;
+     * sans clé `studio`, un nouveau studio est créé par seedStudio().
+     *
      * @param array<string,mixed> $overrides Optional keys: title, slug, synopsis,
      *                                        year, duration, views, bunnyVideoId,
      *                                        status, studio.
@@ -229,6 +261,8 @@ abstract class ApiTestCase extends WebTestCase
     /**
      * Create and persist a valid PUBLISHED serie in the test DB.
      *
+     * Série sans saison ; même principe d'`$overrides` que seedPublishedFilm().
+     *
      * @param array<string,mixed> $overrides Optional keys: title, slug, synopsis,
      *                                        year, status, studio.
      */
@@ -253,6 +287,9 @@ abstract class ApiTestCase extends WebTestCase
     /**
      * Create a PUBLISHED serie with season 1 + one episode (bunnyVideoId set),
      * and return the episode — used by the /api/episodes/* tests.
+     *
+     * L'épisode n° 1 (45 min) a un bunnyVideoId factice `bunny-ep-{suffixe}` ;
+     * la série est marquée `nbSeasons = 1`.
      */
     protected function seedPublishedEpisode(EntityManagerInterface $em): Episode
     {
@@ -291,6 +328,9 @@ abstract class ApiTestCase extends WebTestCase
 
     /**
      * Assert that a response is JSON and decode it.
+     *
+     * Vérifie le code HTTP attendu (le corps de la réponse est affiché en cas
+     * d'écart, ce qui facilite le diagnostic) puis renvoie le JSON décodé en tableau.
      */
     protected function assertJsonResponse(Response $response, int $expectedStatus): array
     {
@@ -305,6 +345,9 @@ abstract class ApiTestCase extends WebTestCase
 
     /**
      * Assert that a paginated catalogue response has the expected structure.
+     *
+     * Forme `{data: [...], total, page, limit}` des listes paginées maison
+     * (pas le format Hydra d'API Platform).
      */
     protected function assertPaginatedStructure(array $body): void
     {
@@ -317,6 +360,8 @@ abstract class ApiTestCase extends WebTestCase
 
     /**
      * Generate a random UUID v4 string — useful for 404 tests.
+     *
+     * UUID bien formé mais absent de la base : l'endpoint doit répondre 404, pas 400.
      */
     protected function randomUuid(): string
     {

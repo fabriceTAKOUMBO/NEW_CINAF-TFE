@@ -27,11 +27,19 @@ use Symfony\Component\Console\Tester\CommandTester;
  *  - la déduplication des slugs
  *  - la distribution déterministe via crc32
  *  - le mode --dry-run (aucune écriture)
+ *  - une FilmPart par vidéo d'un film en plusieurs parties
+ *  - l'option --purge, qui épargne le contenu uploadé par les studios
+ *
+ * Seul Bunny est simulé : les entités sont réellement écrites dans la base
+ * de test (KernelTestCase), vidée avant chaque test par resetTestDatabase().
+ *
+ * Lancement : `php bin/phpunit tests/Command/ImportBunnyCatalogueCommandTest.php`.
  */
 class ImportBunnyCatalogueCommandTest extends KernelTestCase
 {
     private EntityManagerInterface $em;
 
+    /** Démarre le kernel et repart d'une base sans œuvres, studios ni utilisateurs. */
     protected function setUp(): void
     {
         self::bootKernel();
@@ -44,6 +52,7 @@ class ImportBunnyCatalogueCommandTest extends KernelTestCase
         parent::tearDown();
     }
 
+    /** Avec 5 studios seulement, la commande échoue (code 1) et réclame les 10 studios fictifs. */
     public function test_command_fails_without_10_studios(): void
     {
         // Crée seulement 5 studios.
@@ -58,6 +67,7 @@ class ImportBunnyCatalogueCommandTest extends KernelTestCase
         $this->assertStringContainsString('10 studios fictifs requis', $tester->getDisplay());
     }
 
+    /** --dry-run : rapport avec actions [CREATE] et mention DRY-RUN, mais aucun film ni série en base. */
     public function test_dry_run_makes_no_writes(): void
     {
         $this->seedStudios(10);
@@ -88,6 +98,7 @@ class ImportBunnyCatalogueCommandTest extends KernelTestCase
         $this->assertSame(0, $serieRepo->count([]));
     }
 
+    /** Import de 2 films : chacun est créé PUBLISHED, avec une date de publication et un studio. */
     public function test_import_creates_film_entities_with_studio_assignment(): void
     {
         $studios = $this->seedStudios(10);
@@ -115,6 +126,7 @@ class ImportBunnyCatalogueCommandTest extends KernelTestCase
         }
     }
 
+    /** Série à 2 saisons (2 + 1 épisodes) : `nbSeasons` = 2 et 3 épisodes créés. */
     public function test_import_creates_serie_with_seasons_and_episodes(): void
     {
         $this->seedStudios(10);
@@ -151,6 +163,7 @@ class ImportBunnyCatalogueCommandTest extends KernelTestCase
         $this->assertSame(3, $totalEpisodes);
     }
 
+    /** Deux imports successifs du même catalogue : le second ne crée rien (toujours 1 film en base). */
     public function test_import_is_idempotent_second_run_creates_nothing(): void
     {
         $this->seedStudios(10);
@@ -174,6 +187,7 @@ class ImportBunnyCatalogueCommandTest extends KernelTestCase
         $this->assertSame(1, $count2, 'Idempotence : second run must create nothing.');
     }
 
+    /** Un film et une série au même slug `duplicate` : deux slugs distincts de la forme `duplicate(-N)`. */
     public function test_slug_deduplication_on_collision(): void
     {
         $this->seedStudios(10);
@@ -199,6 +213,7 @@ class ImportBunnyCatalogueCommandTest extends KernelTestCase
         $this->assertMatchesRegularExpression('/^duplicate(-\d+)?$/', $serie->getSlug());
     }
 
+    /** Le film `my-det-film` est rattaché au studio d'index crc32(slug) % 10 parmi les studios triés par slug. */
     public function test_crc32_distribution_assigns_to_correct_studio(): void
     {
         $studios = $this->seedStudios(10);
@@ -225,6 +240,7 @@ class ImportBunnyCatalogueCommandTest extends KernelTestCase
         );
     }
 
+    /** Film en 3 parties : 3 FilmPart ordonnées, `bunnyVideoId` sur la 1re partie, `bunnyFolder` sur le dossier du film. */
     public function test_import_creates_one_film_part_per_video(): void
     {
         $this->seedStudios(10);
@@ -259,6 +275,7 @@ class ImportBunnyCatalogueCommandTest extends KernelTestCase
         $this->assertStringContainsString('parties', $tester->getDisplay());
     }
 
+    /** Réimport avec --purge : l'œuvre importée est recréée et le film uploadé par un studio (`studios/…`) est conservé. */
     public function test_purge_removes_imported_works_but_keeps_studio_content(): void
     {
         $studios = $this->seedStudios(10);
@@ -367,6 +384,11 @@ class ImportBunnyCatalogueCommandTest extends KernelTestCase
         return $mock;
     }
 
+    /**
+     * Instancie la commande à la main avec le catalogue simulé (les vrais
+     * repositories et l'EntityManager viennent du container), puis
+     * l'enregistre dans une Application console pour l'exécuter via CommandTester.
+     */
     private function buildCommandTester(BunnyCatalogueService $catalogue): CommandTester
     {
         $kernel = static::$kernel;
@@ -424,6 +446,8 @@ class ImportBunnyCatalogueCommandTest extends KernelTestCase
     /**
      * Reset la DB de test : supprime film, serie, season, episode, studio, user.
      * Plus rapide qu'un drop/create complet (qui prendrait plusieurs secondes).
+     * (Vide aussi `film_part` et `withdrawal_request` ; l'ordre des DELETE
+     * respecte les clés étrangères, enfants d'abord.)
      */
     private function resetTestDatabase(): void
     {

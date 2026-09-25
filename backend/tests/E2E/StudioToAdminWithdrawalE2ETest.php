@@ -33,9 +33,20 @@ use Symfony\Component\PasswordHasher\Hasher\UserPasswordHasherInterface;
  * 11. POST /api/admin/withdrawals/{wrId}/approve → film passe WITHDRAWN
  * 12. GET /api/catalogue/discover → film disparu
  * 13. GET /api/admin/films/{id} → status=WITHDRAWN, withdrawnAt set
+ *
+ * NB : les « login » des étapes 2 et 9 sont simulés : les JWT sont forgés
+ * directement par JWTTokenManagerInterface (seedProducerWithStudio() et
+ * seedAdmin()), sans appel à /api/auth/login. Le test vide au préalable les
+ * tables du catalogue (cleanCatalogueTables()) pour que le catalogue public ne
+ * contienne que son propre film.
+ *
+ * Lancement : php bin/phpunit tests/E2E/StudioToAdminWithdrawalE2ETest.php
  */
 class StudioToAdminWithdrawalE2ETest extends ApiTestCase
 {
+    /**
+     * Positionne CATALOGUE_SOURCE=db avant le démarrage du kernel (voir ci-dessous).
+     */
     protected function setUp(): void
     {
         // Phase F — force CATALOGUE_SOURCE=db pour ce test e2e (sinon le
@@ -47,6 +58,10 @@ class StudioToAdminWithdrawalE2ETest extends ApiTestCase
         parent::setUp();
     }
 
+    /**
+     * Déroule le scénario complet décrit en tête de classe : chaque étape
+     * dépend de l'état laissé par la précédente.
+     */
     public function testFullScenario(): void
     {
         $client = static::createClient();
@@ -102,7 +117,9 @@ class StudioToAdminWithdrawalE2ETest extends ApiTestCase
         $this->assertSame($filmId, $withdrawal['targetId']);
         $withdrawalId = $withdrawal['id'];
 
-        // 8. Tentative de second withdraw → 409 (contrainte unique partielle)
+        // 8. Tentative de second withdraw → 409 (pré-contrôle de
+        // ContentLifecycleService ; l'index unique partiel uniq_withdrawal_pending
+        // n'est que le filet de sécurité en base)
         $resp = $this->postJson($client, '/api/studio/films/' . $filmId . '/withdraw', [
             'reason' => 'Doublon',
         ], $producerToken);
@@ -146,6 +163,9 @@ class StudioToAdminWithdrawalE2ETest extends ApiTestCase
     // -----------------------------------------------------------------------
 
     /**
+     * Crée un créateur (mot de passe `Producer1234!`) et son studio actif et
+     * déjà validé, puis forge son JWT.
+     *
      * @return array{0: User, 1: Studio, 2: string}
      */
     private function seedProducerWithStudio(): array
@@ -183,6 +203,8 @@ class StudioToAdminWithdrawalE2ETest extends ApiTestCase
     }
 
     /**
+     * Crée un administrateur (ROLE_ADMIN, email unique) et forge son JWT.
+     *
      * @return array{0: User, 1: string}
      */
     private function seedAdmin(): array
@@ -207,6 +229,11 @@ class StudioToAdminWithdrawalE2ETest extends ApiTestCase
         return [$admin, $jwt->create($admin)];
     }
 
+    /**
+     * Vide les demandes de retrait, épisodes, saisons, séries et films de la base
+     * de test (SQL direct, dans l'ordre imposé par les clés étrangères) puis
+     * détache les entités chargées.
+     */
     private function cleanCatalogueTables(): void
     {
         /** @var EntityManagerInterface $em */

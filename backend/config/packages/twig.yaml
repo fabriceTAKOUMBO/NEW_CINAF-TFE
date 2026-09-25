@@ -1,6 +1,10 @@
+# Twig n'est pas utilisé par les endpoints JSON : il rend la page HTML de
+# documentation d'API Platform (Swagger UI, GET /api — cf. gotcha n° 6).
 twig:
     file_name_pattern: '*.twig'
 
+# En test, une variable inexistante dans un template lève une erreur au lieu
+# d'être ignorée.
 when@test:
     twig:
         strict_variables: true

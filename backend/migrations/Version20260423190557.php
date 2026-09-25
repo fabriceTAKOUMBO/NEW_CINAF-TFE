@@ -10,6 +10,9 @@ use Doctrine\Migrations\AbstractMigration;
 /**
  * Sprint 7 — Dashboard admin : ajout du champ `is_suspended` sur la table `user`.
  *
+ * Un compte suspendu par un administrateur est refusé au login (403). La valeur
+ * par défaut `false` laisse actifs tous les comptes déjà existants.
+ *
  * Note : la génération automatique produit un DROP sur `refresh_tokens` (table
  * du bundle gesdinet déclarée via mapped-superclass XML, non détectée par
  * Doctrine). Ces instructions ont été retirées manuellement (cf. gotcha #1

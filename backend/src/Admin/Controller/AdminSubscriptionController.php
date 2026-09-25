@@ -17,6 +17,17 @@ use Symfony\Component\Uid\Uuid;
 /**
  * Gestion des abonnements depuis l'interface admin
  * (`/admin/utilisateurs/{id}` côté frontend).
+ *
+ * Routes, toutes sous `/api/admin/users/{id}` (ROLE_ADMIN exigé par
+ * `#[IsGranted]` et par la règle `access_control` sur `^/api/admin`) :
+ *  - GET    /subscription         abonnement actif de l'utilisateur
+ *  - POST   /subscription         attribution d'un plan (activation immédiate, sans paiement)
+ *  - PATCH  /subscription         changement de plan et/ou de date de début
+ *  - DELETE /subscription         résiliation différée
+ *  - POST   /subscription/resume  annulation de cette résiliation
+ *  - GET    /payments             factures Stripe de l'utilisateur
+ * `{id}` est l'UUID de l'utilisateur concerné : 400 s'il est mal formé,
+ * 404 s'il est inconnu (cf. resolveUser()).
  */
 #[IsGranted('ROLE_ADMIN')]
 class AdminSubscriptionController extends AbstractController
@@ -31,6 +42,11 @@ class AdminSubscriptionController extends AbstractController
     ) {
     }
 
+    /**
+     * Renvoie l'abonnement actif (ACTIVE, `endsAt` non dépassé) de l'utilisateur.
+     *
+     * @return JsonResponse 200 `{subscription: Subscription::toArray()|null}` ; 400/404 (cf. resolveUser())
+     */
     #[Route('/api/admin/users/{id}/subscription', methods: ['GET'])]
     public function get(string $id): JsonResponse
     {
@@ -44,6 +60,17 @@ class AdminSubscriptionController extends AbstractController
         ]);
     }
 
+    /**
+     * Attribue un plan à l'utilisateur : l'abonnement est activé immédiatement,
+     * sans paiement ni appel à Stripe (SubscriptionService::subscribe()).
+     *
+     * Corps JSON : `{planId}`. Contrairement au parcours utilisateur, un plan
+     * désactivé peut être attribué (pas de contrôle `isActive`). L'abonnement
+     * actif précédent passe en CANCELED, en base uniquement.
+     *
+     * @return JsonResponse 201 `Subscription::toArray()` ; 400 planId absent ou mal formé ;
+     *                      404 utilisateur ou plan introuvable
+     */
     #[Route('/api/admin/users/{id}/subscription', methods: ['POST'])]
     public function assign(string $id, Request $request): JsonResponse
     {
@@ -77,6 +104,14 @@ class AdminSubscriptionController extends AbstractController
      * - `planId` (optionnel) : change le plan
      * - `startsAt` (optionnel, ISO 8601 ou date YYYY-MM-DD) : change la date de début
      * `endsAt` est recalculé automatiquement à partir du couple (startsAt, plan).
+     *
+     * Le statut est aussi remis à ACTIVE et `canceledAt` effacé
+     * (SubscriptionService::update()). Modification purement locale : pour un
+     * abonnement payé via Stripe, rien n'est répercuté chez Stripe.
+     *
+     * @return JsonResponse 200 `Subscription::toArray()` ; 400 JSON invalide, planId ou date
+     *                      invalide, ou aucun des deux champs fourni ; 404 utilisateur,
+     *                      abonnement actif ou plan introuvable
      */
     #[Route('/api/admin/users/{id}/subscription', methods: ['PATCH'])]
     public function update(string $id, Request $request): JsonResponse
@@ -129,6 +164,12 @@ class AdminSubscriptionController extends AbstractController
     /**
      * Résiliation différée (admin) : équivalent du flux user mais piloté
      * depuis le back-office. Stripe `cancel_at_period_end=true`, local reste ACTIVE.
+     *
+     * L'utilisateur garde l'accès jusqu'à `endsAt` ; Stripe n'est appelé que si
+     * l'abonnement a un stripeSubscriptionId et que Stripe est activé.
+     *
+     * @return JsonResponse 200 `{message, subscription}` ; 404 si aucun abonnement actif ;
+     *                      400/404 (cf. resolveUser())
      */
     #[Route('/api/admin/users/{id}/subscription', methods: ['DELETE'])]
     public function cancel(string $id): JsonResponse
@@ -167,6 +208,9 @@ class AdminSubscriptionController extends AbstractController
     /**
      * Réactive (admin) un abonnement résilié de manière différée
      * tant que la période payée n'est pas terminée. 409 sinon.
+     *
+     * @return JsonResponse 200 `{message, subscription}` ; 404 si aucun abonnement actif ;
+     *                      409 si l'abonnement n'est pas en cours de résiliation
      */
     #[Route('/api/admin/users/{id}/subscription/resume', methods: ['POST'])]
     public function resume(string $id): JsonResponse
@@ -213,6 +257,10 @@ class AdminSubscriptionController extends AbstractController
      * Historique des paiements (invoices Stripe) d'un user vu côté admin.
      * Renvoie `[]` si l'utilisateur n'a jamais payé via Stripe ou si Stripe est désactivé.
      * 404 si l'utilisateur est inconnu.
+     *
+     * Factures lues en direct chez Stripe ; une erreur Stripe donne aussi `[]`.
+     *
+     * @return JsonResponse 200 liste de factures (cf. StripeService::listInvoices()) ; 400/404 (cf. resolveUser())
      */
     #[Route('/api/admin/users/{id}/payments', methods: ['GET'])]
     public function payments(string $id): JsonResponse
@@ -240,6 +288,12 @@ class AdminSubscriptionController extends AbstractController
         return $this->json($invoices);
     }
 
+    /**
+     * Convertit le `{id}` de l'URL en utilisateur, ou renvoie directement la
+     * réponse d'erreur à retourner : les actions testent `instanceof JsonResponse`.
+     *
+     * @return \App\Entity\User|JsonResponse l'utilisateur, ou une réponse 400 (UUID mal formé) / 404 (inconnu)
+     */
     private function resolveUser(string $id): \App\Entity\User|JsonResponse
     {
         try {

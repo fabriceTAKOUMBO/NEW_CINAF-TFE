@@ -17,9 +17,19 @@ use Symfony\Component\Uid\Uuid;
  * Gestion centralisée du cycle de vie d'un contenu (Film/Serie) :
  * DRAFT → PUBLISHED → (demande de retrait) → WITHDRAWN.
  *
+ * Pour un studio pas encore validé (créé en self-service), la publication
+ * passe par une étape d'approbation :
+ * DRAFT → PENDING_APPROVAL → PUBLISHED (approbation admin, qui valide aussi
+ * le studio) ou → DRAFT (refus admin).
+ *
  * Toutes les transitions sont stateful et synchronisées avec la base de
  * données via flush. La création d'une demande de retrait est protégée
  * contre les doublons (409 si une demande PENDING existe déjà).
+ *
+ * Appelants : StudioFilmController / StudioSerieController (publication et
+ * demande de retrait), AdminApprovalController (approbation / refus) et
+ * AdminWithdrawalController (passage en WITHDRAWN). Les exceptions HTTP levées
+ * ici (400, 409) sont converties en réponses d'erreur par Symfony.
  */
 class ContentLifecycleService
 {
@@ -46,6 +56,8 @@ class ContentLifecycleService
             );
         }
         $studio = $film->getStudio();
+        // publishedAt n'est daté qu'au passage effectif en PUBLISHED (ici ou
+        // lors de l'approbation admin), pas à la mise en attente.
         if ($studio !== null && !$studio->isValidated()) {
             $film->setStatus(Film::STATUS_PENDING_APPROVAL);
         } else {
@@ -162,6 +174,18 @@ class ContentLifecycleService
      * Crée une demande de retrait. Refuse le doublon : 409 si une demande
      * PENDING existe déjà pour ce contenu.
      *
+     * Ce pré-contrôle applicatif double l'index unique partiel
+     * `uniq_withdrawal_pending` (une seule demande PENDING par contenu), qui
+     * reste le filet de sécurité en base. Le statut du contenu visé n'est pas
+     * vérifié ici.
+     *
+     * @param string $targetType  `film` ou `serie` (WithdrawalRequest::TARGET_*)
+     * @param Uuid   $targetId    identifiant du film ou de la série à retirer
+     * @param User   $requestedBy utilisateur studio à l'origine de la demande
+     * @param string $reason      motif saisi par le studio, transmis à l'admin
+     *
+     * @return WithdrawalRequest la demande persistée, au statut PENDING
+     *
      * @throws ConflictHttpException
      */
     public function requestWithdrawal(
@@ -193,6 +217,9 @@ class ContentLifecycleService
     /**
      * Marque un film comme retiré (utilisé par l'admin lors de l'approbation
      * d'une WithdrawalRequest — Agent 3).
+     *
+     * Aucun contrôle du statut de départ ici : c'est l'appelant
+     * (AdminWithdrawalController::approve()) qui refuse un film déjà retiré (409).
      */
     public function markFilmWithdrawn(Film $film): void
     {
@@ -201,6 +228,11 @@ class ContentLifecycleService
         $this->em->flush();
     }
 
+    /**
+     * Marque une série comme retirée (statut WITHDRAWN + date de retrait), lors
+     * de l'approbation d'une WithdrawalRequest par l'admin. Même contrat que
+     * markFilmWithdrawn().
+     */
     public function markSerieWithdrawn(Serie $serie): void
     {
         $serie->setStatus(Serie::STATUS_WITHDRAWN);

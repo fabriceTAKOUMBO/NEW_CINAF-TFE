@@ -17,15 +17,29 @@ use Symfony\Component\Uid\Uuid;
 /**
  * Endpoints user-side pour gérer son propre abonnement.
  *
+ * Préfixe `/api/subscriptions`, réservé aux utilisateurs connectés : ROLE_USER
+ * via `#[IsGranted]` (aucune règle `access_control` ne couvre ce préfixe).
+ *  - GET  /current              abonnement actif (ou null)
+ *  - POST /subscribe            souscription à un plan
+ *  - GET  /session/{sessionId}  statut d'une session Stripe Checkout (page de retour)
+ *  - POST /cancel               résiliation différée à la fin de la période payée
+ *  - POST /resume               annulation de cette résiliation avant l'échéance
+ *  - GET  /payments             historique des factures Stripe
+ *
  * `POST /subscribe` se comporte en 2 modes selon STRIPE_ENABLED :
  *  - false (mock) : active immédiatement côté serveur → 201 + sub.toArray().
- *  - true  (Stripe) : crée une Checkout Session → 200 + {checkoutUrl}.
+ *  - true  (Stripe) : crée une Checkout Session en mode intégré (Embedded
+ *    Checkout) → 200 + {mode: 'stripe', clientSecret, sessionId} ; le front
+ *    affiche le formulaire de carte Stripe dans sa page grâce au `clientSecret`.
  *    L'abo sera réellement créé en DB côté webhook (`checkout.session.completed`).
  */
 #[Route('/api/subscriptions')]
 #[IsGranted('ROLE_USER')]
 class SubscriptionController extends AbstractController
 {
+    /**
+     * @param bool $stripeEnabled valeur de STRIPE_ENABLED, injectée par config/services.yaml
+     */
     public function __construct(
         private readonly SubscriptionRepository $subRepo,
         private readonly SubscriptionPlanRepository $planRepo,
@@ -36,6 +50,12 @@ class SubscriptionController extends AbstractController
     ) {
     }
 
+    /**
+     * Renvoie l'abonnement actif de l'utilisateur connecté (statut ACTIVE et
+     * `endsAt` non dépassé), avec le détail de son plan.
+     *
+     * @return JsonResponse 200 `{subscription: Subscription::toArray()}` ou `{subscription: null}`
+     */
     #[Route('/current', methods: ['GET'])]
     public function current(): JsonResponse
     {
@@ -47,6 +67,23 @@ class SubscriptionController extends AbstractController
         ]);
     }
 
+    /**
+     * Souscrit l'utilisateur connecté au plan demandé.
+     *
+     * Corps JSON : `{planId}` (UUID d'un plan actif).
+     *  - Mode Stripe : rien n'est écrit en base ici. On ouvre une session
+     *    Embedded Checkout et on renvoie son `clientSecret` ; l'abonnement local
+     *    naîtra du webhook `checkout.session.completed` une fois le paiement validé.
+     *    L'identifiant client Stripe de l'abonnement le plus récent est réutilisé
+     *    pour regrouper l'historique de facturation chez Stripe.
+     *  - Mode simulé : l'abonnement est activé tout de suite, sans paiement (un
+     *    abonnement actif précédent passe en CANCELED, cf. SubscriptionService::subscribe()).
+     *
+     * @return JsonResponse 201 `Subscription::toArray()` (mode simulé) ;
+     *                      200 `{mode: 'stripe', clientSecret, sessionId}` (mode Stripe) ;
+     *                      400 planId absent ou mal formé, plan désactivé ou sans prix Stripe ;
+     *                      404 plan introuvable
+     */
     #[Route('/subscribe', methods: ['POST'])]
     public function subscribe(Request $request): JsonResponse
     {
@@ -85,6 +122,7 @@ class SubscriptionController extends AbstractController
             ]);
         }
 
+        // Mode simulé (STRIPE_ENABLED=false : démo et suite de tests) : activation immédiate.
         $sub = $this->subService->subscribe($user, $plan);
         return $this->json($sub->toArray(), 201);
     }
@@ -92,6 +130,14 @@ class SubscriptionController extends AbstractController
     /**
      * Endpoint utilisé par la page de retour Embedded Checkout pour afficher
      * un statut immédiat (paid / unpaid) sans attendre le webhook.
+     *
+     * Simple lecture chez Stripe : n'écrit rien en base (seul le webhook crée
+     * l'abonnement). La contrainte de route n'accepte que des identifiants de
+     * session Checkout (`cs_…`). Aucune vérification ne rattache la session à
+     * l'utilisateur connecté.
+     *
+     * @return JsonResponse 200 `{status, paymentStatus, customerEmail}` ; 404 session
+     *                      introuvable (ou toute erreur Stripe) ; 503 si Stripe est désactivé
      */
     #[Route('/session/{sessionId}', methods: ['GET'], requirements: ['sessionId' => 'cs_[a-zA-Z0-9_]+'])]
     public function sessionStatus(string $sessionId): JsonResponse
@@ -116,6 +162,11 @@ class SubscriptionController extends AbstractController
      *  - Stripe : `cancel_at_period_end = true` (plus de prélèvement, accès maintenu jusqu'à endsAt).
      *  - Local : `status` reste ACTIVE, `canceledAt = now`, `endsAt` préservé.
      * Le webhook `customer.subscription.deleted` basculera ensuite en EXPIRED.
+     * En mode simulé (ou pour un abonnement sans identifiant Stripe), aucun
+     * webhook ne viendra : l'abonnement cesse simplement d'être actif une fois
+     * `endsAt` dépassé, car la recherche de l'abonnement actif filtre sur cette date.
+     *
+     * @return JsonResponse 200 `{message, subscription}` ; 404 si aucun abonnement actif
      */
     #[Route('/cancel', methods: ['POST'])]
     public function cancel(): JsonResponse
@@ -127,6 +178,8 @@ class SubscriptionController extends AbstractController
             return $this->json(['message' => 'Aucun abonnement actif à annuler.'], 404);
         }
 
+        // Stripe n'est appelé que pour un abonnement réellement payé via Stripe ;
+        // un abonnement simulé ou attribué par un admin n'a pas de stripeSubscriptionId.
         $stripeId = $sub->getStripeSubscriptionId();
         if ($this->stripeEnabled && $stripeId !== null) {
             try {
@@ -154,6 +207,14 @@ class SubscriptionController extends AbstractController
      * Réactive un abonnement précédemment résilié de manière différée
      * (tant que la période payée n'est pas terminée).
      * Renvoie 409 si l'abo n'est pas dans l'état « résilié-actif ».
+     *
+     * « Résilié-actif » = statut ACTIVE, `endsAt` futur et `canceledAt` renseigné.
+     * En mode Stripe, `cancel_at_period_end` repasse à false chez Stripe pour
+     * que les prélèvements reprennent à l'échéance.
+     *
+     * @return JsonResponse 200 `{message, subscription}` ; 404 si aucun abonnement actif ;
+     *                      409 si l'abonnement n'est pas en cours de résiliation
+     *                      (ou si SubscriptionService::resume() le refuse)
      */
     #[Route('/resume', methods: ['POST'])]
     public function resume(): JsonResponse
@@ -197,6 +258,12 @@ class SubscriptionController extends AbstractController
      * Historique des paiements (invoices Stripe) de l'utilisateur courant.
      * Renvoie un tableau vide si l'utilisateur n'a jamais payé via Stripe
      * (pas de stripeCustomerId) ou si Stripe est désactivé sur cette instance.
+     *
+     * Les factures sont lues en direct chez Stripe (aucune copie locale). Le
+     * client Stripe est celui de l'abonnement le plus récent de l'utilisateur.
+     *
+     * @return JsonResponse 200 liste de factures (cf. StripeService::listInvoices()),
+     *                      éventuellement vide — y compris en cas d'erreur Stripe
      */
     #[Route('/payments', methods: ['GET'])]
     public function payments(): JsonResponse

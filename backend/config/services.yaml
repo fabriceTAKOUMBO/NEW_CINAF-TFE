@@ -3,8 +3,14 @@
 
 parameters:
     # Bunny Storage — endpoint et CA bundle partagés par toutes les zones.
+    # (Une zone hébergée dans une autre région peut surcharger l'endpoint :
+    # voir `cinaf-engine-zone` dans app.bunny.zones.)
     app.bunny.endpoint: '%env(BUNNY_ENDPOINT)%'
+    # Bundle de certificats Mozilla : PHP sous Windows n'a pas de magasin de CA
+    # système, sans lui les appels HTTPS de Guzzle vers Bunny échouent.
     app.bunny.ca_bundle: '%kernel.project_dir%/config/certs/cacert.pem'
+    # Zone utilisée quand BunnyZoneRegistry::get() est appelé sans nom : c'est
+    # notamment là qu'atterrissent les uploads de l'espace studio.
     app.bunny.default_zone: '%env(BUNNY_DEFAULT_ZONE)%'
 
     # Zone source du catalogue public (peut diverger de default_zone à terme).
@@ -27,6 +33,9 @@ parameters:
 
     # Map des Storage Zones disponibles.
     # Pour ajouter une zone : déclarer sa AccessKey dans .env.local et l'ajouter ici.
+    # Vider ensuite le cache : aucune modification du code PHP n'est nécessaire.
+    # Pour chaque zone : clé d'accès, URL publique de sa pull zone CDN et,
+    # facultativement, un endpoint Storage propre à sa région.
     app.bunny.zones:
         backupcinaf:
             accessKey: '%env(BUNNY_ZONE_BACKUPCINAF_KEY)%'
@@ -55,6 +64,9 @@ services:
         autoconfigure: true # Automatically registers your services as commands, event subscribers, etc.
 
     # makes classes in src/ available to be used as services
+    # Couvre aussi src/Admin et src/Studio : les services des bounded contexts
+    # sont autowirés sans déclaration (seules leurs routes doivent être
+    # déclarées, dans config/routes.yaml).
     App\:
         resource: '../src/'
         exclude:
@@ -119,6 +131,8 @@ services:
             $cancelUrl: '%app.stripe.cancel_url%'
             $enabled: '%app.stripe.enabled%'
 
+    # Contrôleur d'abonnement : même drapeau STRIPE_ENABLED, pour choisir entre
+    # activation simulée (mock) et paiement Stripe réel.
     App\Controller\SubscriptionController:
         arguments:
             $stripeEnabled: '%app.stripe.enabled%'

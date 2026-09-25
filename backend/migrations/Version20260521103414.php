@@ -11,6 +11,10 @@ use Doctrine\Migrations\AbstractMigration;
  * Ajoute la table `studio_subscription` (abonnement gratuit user → studio,
  * sémantique « follow YouTube »).
  *
+ * À ne pas confondre avec la table `subscription` (abonnement payant à la
+ * plateforme) : il s'agit ici d'un simple suivi, dont le nombre est affiché
+ * sur le tableau de bord du studio (`subscribersCount` de GET /api/studio/me).
+ *
  * Schéma :
  *  - PK : id UUID
  *  - FK : user_id (ON DELETE CASCADE), studio_id (ON DELETE CASCADE)

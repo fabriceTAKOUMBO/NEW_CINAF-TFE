@@ -17,9 +17,18 @@ use Symfony\Component\Uid\Uuid;
 
 /**
  * Tests fonctionnels de GET /api/subscriptions/payments — historique invoices Stripe.
+ *
+ * STRIPE_ENABLED=false en env test : le cas « client Stripe existant »
+ * instancie donc le contrôleur à la main avec un StripeService mocké (aucun
+ * appel réseau) ; les autres cas passent par le client HTTP.
+ * Lancement : `php bin/phpunit tests/Controller/SubscriptionPaymentsControllerTest.php`.
  */
 final class SubscriptionPaymentsControllerTest extends ApiTestCase
 {
+    /**
+     * Utilisateur ayant un stripeCustomerId : listInvoices() est appelé une fois avec
+     * cet identifiant et ses factures sont renvoyées telles quelles (200).
+     */
     public function testPaymentsReturns200WithArrayForUserWithStripeCustomer(): void
     {
         // Stripe désactivé en env test → on instancie le contrôleur avec un mock
@@ -82,6 +91,7 @@ final class SubscriptionPaymentsControllerTest extends ApiTestCase
         $this->assertSame('paid', $body[0]['status']);
     }
 
+    /** Utilisateur connecté jamais passé par Stripe (et Stripe désactivé) → 200 avec un tableau vide. */
     public function testPaymentsReturnsEmptyArrayWhenNoStripeCustomerId(): void
     {
         $client = static::createClient();
@@ -95,6 +105,7 @@ final class SubscriptionPaymentsControllerTest extends ApiTestCase
         $this->assertSame([], $body);
     }
 
+    /** Appel sans JWT → 401. */
     public function testPaymentsReturns401ForAnonymous(): void
     {
         $client = static::createClient();
@@ -107,6 +118,9 @@ final class SubscriptionPaymentsControllerTest extends ApiTestCase
     // ----------------------------------------------------------------
 
     /**
+     * Persiste un utilisateur ROLE_USER (email unique) et forge son JWT sans passer
+     * par `/api/auth/login`.
+     *
      * @return array{0:User,1:string}
      */
     private function createUserWithToken(EntityManagerInterface $em): array
@@ -129,6 +143,7 @@ final class SubscriptionPaymentsControllerTest extends ApiTestCase
         return [$user, $jwt->create($user)];
     }
 
+    /** Persiste un plan mensuel actif au nom unique. */
     private function seedPlan(EntityManagerInterface $em): SubscriptionPlan
     {
         $plan = new SubscriptionPlan();
@@ -144,6 +159,7 @@ final class SubscriptionPaymentsControllerTest extends ApiTestCase
         return $plan;
     }
 
+    /** Persiste un abonnement ACTIVE (début il y a 2 jours, fin dans 25 jours), sans client Stripe. */
     private function seedActiveSubscription(
         EntityManagerInterface $em,
         User $user,

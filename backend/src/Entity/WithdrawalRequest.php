@@ -5,49 +5,79 @@ use App\Repository\WithdrawalRequestRepository;
 use Doctrine\ORM\Mapping as ORM;
 use Symfony\Component\Uid\Uuid;
 
+/**
+ * Demande de retrait d'un contenu publié, déposée par un studio et
+ * arbitrée par un administrateur.
+ *
+ * Flux : le studio dépose la demande (POST /api/studio/films/{id}/withdraw
+ * ou /api/studio/series/{id}/withdraw, via
+ * ContentLifecycleService::requestWithdrawal()) en statut PENDING ; un admin
+ * l'approuve — le contenu passe alors en WITHDRAWN — ou la rejette, depuis
+ * /api/admin/withdrawals.
+ *
+ * La cible est polymorphe (`targetType` + `targetId`) : il n'y a donc pas de
+ * clé étrangère vers le contenu. Un index unique PARTIEL `uniq_withdrawal_pending`
+ * (target_type, target_id) WHERE status = 'PENDING', créé en SQL natif par la
+ * migration Version20260430100200, interdit deux demandes en attente pour un
+ * même contenu. Invisible pour l'ORM (d'où un `DROP INDEX` parasite dans
+ * chaque `migrations:diff`), il est doublé d'un contrôle applicatif (409).
+ */
 #[ORM\Entity(repositoryClass: WithdrawalRequestRepository::class)]
 #[ORM\Table(name: 'withdrawal_request')]
 #[ORM\Index(name: 'idx_withdrawal_target_status', columns: ['target_type', 'target_id', 'status'])]
 class WithdrawalRequest
 {
+    /** Valeurs possibles de `targetType`. */
     public const TARGET_FILM = 'film';
     public const TARGET_SERIE = 'serie';
 
+    /** En attente de décision admin (statut initial). */
     public const STATUS_PENDING = 'PENDING';
+    /** Acceptée : le contenu visé a été passé en WITHDRAWN. */
     public const STATUS_APPROVED = 'APPROVED';
+    /** Refusée : le contenu visé reste publié. */
     public const STATUS_REJECTED = 'REJECTED';
 
     #[ORM\Id]
     #[ORM\Column(type: 'uuid', unique: true)]
     private Uuid $id;
 
+    /** Studio propriétaire du contenu visé. */
     #[ORM\ManyToOne(targetEntity: Studio::class)]
     #[ORM\JoinColumn(name: 'studio_id', referencedColumnName: 'id', nullable: false)]
     private Studio $studio;
 
+    /** Utilisateur (compte studio) qui a déposé la demande. */
     #[ORM\ManyToOne(targetEntity: User::class)]
     #[ORM\JoinColumn(name: 'requested_by_id', referencedColumnName: 'id', nullable: false)]
     private User $requestedBy;
 
+    /** Type du contenu visé : TARGET_FILM ou TARGET_SERIE. */
     #[ORM\Column(length: 10)]
     private string $targetType;
 
+    /** UUID du Film ou de la Serie visé — référence polymorphe, sans FK. */
     #[ORM\Column(type: 'uuid')]
     private Uuid $targetId;
 
+    /** Motif de la demande, saisi par le studio. */
     #[ORM\Column(type: 'text')]
     private string $reason;
 
+    /** Une des constantes STATUS_* (PENDING par défaut). */
     #[ORM\Column(length: 20, options: ['default' => self::STATUS_PENDING])]
     private string $status = self::STATUS_PENDING;
 
+    /** Administrateur ayant statué ; null tant que la demande est en attente. */
     #[ORM\ManyToOne(targetEntity: User::class)]
     #[ORM\JoinColumn(name: 'reviewed_by_id', referencedColumnName: 'id', nullable: true)]
     private ?User $reviewedBy = null;
 
+    /** Date de la décision (approbation ou rejet). */
     #[ORM\Column(nullable: true)]
     private ?\DateTimeImmutable $reviewedAt = null;
 
+    /** Commentaire facultatif de l'administrateur. */
     #[ORM\Column(type: 'text', nullable: true)]
     private ?string $reviewNote = null;
 
@@ -83,6 +113,11 @@ class WithdrawalRequest
 
     /**
      * Approve this request: set status, reviewer, timestamp and optional note.
+     *
+     * N'enregistre que la décision : le passage du contenu en WITHDRAWN est
+     * fait par l'appelant (AdminWithdrawalController, via
+     * ContentLifecycleService). Aucun contrôle du statut courant ici :
+     * l'appelant vérifie que la demande est bien PENDING.
      */
     public function approve(User $admin, ?string $note = null): void
     {
@@ -94,6 +129,9 @@ class WithdrawalRequest
 
     /**
      * Reject this request: set status, reviewer, timestamp and optional note.
+     *
+     * Le contenu visé n'est pas modifié (il reste publié). Comme approve(),
+     * ne vérifie pas le statut courant : c'est le rôle de l'appelant.
      */
     public function reject(User $admin, ?string $note = null): void
     {
@@ -103,6 +141,13 @@ class WithdrawalRequest
         $this->reviewNote = $note;
     }
 
+    /**
+     * Sérialise la demande pour l'API : id, studioId, requestedById,
+     * targetType, targetId, reason, status, reviewedById, reviewedAt,
+     * reviewNote, createdAt (UUID en RFC 4122, dates ATOM ou null).
+     *
+     * @return array<string, mixed>
+     */
     public function toArray(): array
     {
         return [

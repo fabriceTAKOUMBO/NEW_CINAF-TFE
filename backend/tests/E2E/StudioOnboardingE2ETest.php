@@ -25,9 +25,20 @@ use Symfony\Component\Uid\Uuid;
  *  7. POST /api/studio/films → 2e film en DRAFT.
  *  8. POST /api/studio/films/{id}/publish → cette fois le film part direct
  *     en PUBLISHED (le studio est désormais validé).
+ *
+ * Traverse les deux espaces : StudioOnboardingController et StudioFilmController
+ * (via ContentLifecycleService) côté studio, AdminApprovalController côté
+ * admin. Les comptes (utilisateur, admin) sont créés à la volée et leurs JWT
+ * forgés directement, sans passer par /api/auth/login.
+ *
+ * Lancement : php bin/phpunit tests/E2E/StudioOnboardingE2ETest.php
  */
 class StudioOnboardingE2ETest extends ApiTestCase
 {
+    /**
+     * Déroule les 8 étapes ci-dessus dans un seul test, chaque étape
+     * dépendant de l'état laissé par la précédente.
+     */
     public function testFullOnboardingScenario(): void
     {
         $client = static::createClient();
@@ -62,8 +73,10 @@ class StudioOnboardingE2ETest extends ApiTestCase
         $studioId = $studioBody['id'];
 
         // Le user a maintenant ROLE_CREATEUR : on régénère son token pour
-        // intégrer le nouveau rôle au JWT (sinon les calls /api/studio/*
-        // sont refusés par access_control).
+        // intégrer le nouveau rôle au JWT. NB : l'ancien token fonctionnerait
+        // aussi : le pare-feu recharge l'utilisateur depuis la base à chaque
+        // requête (provider `entity`), et access_control vérifie donc les
+        // rôles en base, pas ceux inscrits dans le payload du JWT.
         $em->clear();
         $userEntity = $em->getRepository(User::class)->find($userEntity->getId());
         $this->assertContains('ROLE_CREATEUR', $userEntity->getRoles());

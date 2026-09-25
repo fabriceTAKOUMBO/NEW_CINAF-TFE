@@ -17,6 +17,13 @@ use Symfony\Component\Uid\Uuid;
  * Pas d'appel HTTP, pas de container Stripe enabled — on injecte directement
  * un \Stripe\Event construit à partir de payloads PHP, comme stripe-php le
  * ferait après vérification de signature.
+ *
+ * Couvre la création idempotente (`checkout.session.completed`), le
+ * rafraîchissement de `endsAt` (`customer.subscription.updated`), l'expiration
+ * (`customer.subscription.deleted`) et l'ignorance des autres événements.
+ * Chaque test crée son propre utilisateur et son propre plan (noms uniques) ;
+ * rien n'est nettoyé, la base de test étant recréée par run-tests.ps1.
+ * Lancement : `php bin/phpunit tests/Service/SubscriptionServiceStripeSyncTest.php`.
  */
 final class SubscriptionServiceStripeSyncTest extends KernelTestCase
 {
@@ -30,6 +37,7 @@ final class SubscriptionServiceStripeSyncTest extends KernelTestCase
         $this->service = static::getContainer()->get(SubscriptionService::class);
     }
 
+    /** checkout.session.completed avec métadonnées valides → abonnement ACTIVE, lié à Stripe, endsAt futur. */
     public function testCheckoutCompletedCreatesActiveSubscription(): void
     {
         [$user, $plan] = $this->seedUserAndPlan();
@@ -57,6 +65,7 @@ final class SubscriptionServiceStripeSyncTest extends KernelTestCase
         $this->assertGreaterThan(new \DateTimeImmutable(), $sub->getEndsAt());
     }
 
+    /** Le même événement rejoué deux fois (livraison at-least-once) ne crée qu'un abonnement ; le rejeu renvoie false. */
     public function testCheckoutCompletedIsIdempotent(): void
     {
         [$user, $plan] = $this->seedUserAndPlan();
@@ -84,6 +93,7 @@ final class SubscriptionServiceStripeSyncTest extends KernelTestCase
         $this->assertSame(1, $count);
     }
 
+    /** Session sans métadonnées user_id/plan_id → ignorée (false) : le service n'invente aucun rattachement. */
     public function testCheckoutCompletedSkipsWhenMetadataMissing(): void
     {
         $this->seedUserAndPlan();
@@ -101,6 +111,11 @@ final class SubscriptionServiceStripeSyncTest extends KernelTestCase
         $this->assertFalse($applied);
     }
 
+    /**
+     * customer.subscription.updated portant `current_period_end` → endsAt recalé
+     * exactement sur ce timestamp, statut ACTIVE conservé. (Le payload n'a pas de
+     * `cancel_at_period_end` : c'est la branche de conversion du statut Stripe qui s'exécute.)
+     */
     public function testSubscriptionUpdatedRefreshesEndsAt(): void
     {
         [$user, $plan] = $this->seedUserAndPlan();
@@ -137,6 +152,10 @@ final class SubscriptionServiceStripeSyncTest extends KernelTestCase
         $this->assertSame($futureTs, $sub->getEndsAt()?->getTimestamp());
     }
 
+    /**
+     * customer.subscription.deleted → abonnement local EXPIRED avec canceledAt renseigné.
+     * (Le nom de la méthode date d'avant la refonte : l'état attendu n'est plus CANCELED.)
+     */
     public function testSubscriptionDeletedCancelsLocalSubscription(): void
     {
         [$user, $plan] = $this->seedUserAndPlan();
@@ -173,6 +192,7 @@ final class SubscriptionServiceStripeSyncTest extends KernelTestCase
         $this->assertNotNull($sub->getCanceledAt());
     }
 
+    /** Un type d'événement non géré (payment_intent.created) est ignoré : false, sans effet. */
     public function testUnknownEventTypeIsIgnored(): void
     {
         $event = $this->buildEvent('payment_intent.created', [
@@ -184,6 +204,9 @@ final class SubscriptionServiceStripeSyncTest extends KernelTestCase
     }
 
     /**
+     * Crée en base un utilisateur (email unique) et un plan mensuel actif doté
+     * d'un stripePriceId factice.
+     *
      * @return array{0:User,1:SubscriptionPlan}
      */
     private function seedUserAndPlan(): array
@@ -216,6 +239,10 @@ final class SubscriptionServiceStripeSyncTest extends KernelTestCase
         return [$user, $plan];
     }
 
+    /**
+     * Construit un \Stripe\Event du type donné enveloppant `$object` : stripe-php
+     * convertit `data.object` en Checkout\Session ou Subscription selon son champ `object`.
+     */
     private function buildEvent(string $type, array $object): StripeEvent
     {
         return StripeEvent::constructFrom([

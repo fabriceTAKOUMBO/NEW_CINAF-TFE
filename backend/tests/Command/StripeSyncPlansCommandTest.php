@@ -28,6 +28,9 @@ use Symfony\Component\Console\Tester\CommandTester;
  * Pour l'intégration réelle (env -> services.yaml -> command), la vérification
  * manuelle `php bin/console app:stripe:sync-plans` exécutée par Fabrice après merge
  * sert de smoke test bout-en-bout.
+ *
+ * Aucun appel à Stripe ni à la base : ce test peut tourner sans base de test.
+ * Lancement : `php bin/phpunit tests/Command/StripeSyncPlansCommandTest.php`.
  */
 class StripeSyncPlansCommandTest extends TestCase
 {

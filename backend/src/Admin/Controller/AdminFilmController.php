@@ -17,11 +17,24 @@ use Symfony\Component\Uid\Uuid;
 /**
  * Endpoints admin pour la gestion globale des films, tous studios confondus.
  * Calque le pattern de AdminUserController (resolveFilm, validation UUID, 400/404).
+ *
+ * Préfixe `/api/admin/films`, ROLE_ADMIN (`#[IsGranted]` + `access_control`).
+ *  - GET    /       liste paginée filtrable (statut, studio, titre)
+ *  - GET    /{id}   fiche détaillée
+ *  - PATCH  /{id}   modération / correction (métadonnées, statut, studio, chemins Bunny)
+ *  - DELETE /{id}   suppression définitive
+ * Contrairement à l'espace studio, l'admin n'est soumis à aucun contrôle de
+ * propriété (ni studio, ni préfixe Bunny `studios/{slug}/`).
+ * L'approbation des films PENDING_APPROVAL passe par AdminApprovalController.
  */
 #[Route('/api/admin/films')]
 #[IsGranted('ROLE_ADMIN')]
 class AdminFilmController extends AbstractController
 {
+    /**
+     * Statuts acceptés en filtre de liste et en PATCH. PENDING_APPROVAL en est
+     * exclu : il ne s'obtient que par la publication d'un studio non validé.
+     */
     private const ALLOWED_STATUSES = [
         Film::STATUS_DRAFT,
         Film::STATUS_PUBLISHED,
@@ -35,6 +48,16 @@ class AdminFilmController extends AbstractController
     ) {
     }
 
+    /**
+     * Liste paginée de tous les films, du plus récemment créé au plus ancien.
+     *
+     * Paramètres de requête : `page` (défaut 1), `limit` (défaut 20, borné à 1..100),
+     * `status` (DRAFT, PUBLISHED ou WITHDRAWN), `studioId` (UUID), `search`
+     * (sous-chaîne du titre, insensible à la casse).
+     *
+     * @return JsonResponse 200 `{data, total, page, limit}` (chaque film avec un résumé
+     *                      de son studio) ; 400 statut ou studioId invalide
+     */
     #[Route('', name: 'admin_films_list', methods: ['GET'])]
     public function list(Request $request): JsonResponse
     {
@@ -68,6 +91,11 @@ class AdminFilmController extends AbstractController
         ]);
     }
 
+    /**
+     * Renvoie la fiche détaillée d'un film (relations complètes + résumé du studio).
+     *
+     * @return JsonResponse 200 ; 400 UUID mal formé ; 404 film introuvable
+     */
     #[Route('/{id}', name: 'admin_films_get', methods: ['GET'])]
     public function getOne(string $id): JsonResponse
     {
@@ -79,6 +107,20 @@ class AdminFilmController extends AbstractController
         return $this->json($this->serializeWithStudio($film, true));
     }
 
+    /**
+     * Modifie un film (mise à jour partielle : seuls les champs présents sont traités).
+     *
+     * Champs acceptés : `title` (non vide), `synopsis`, `year`, `duration`,
+     * `poster`, `trailerVideoId`, `bunnyVideoId` (null accepté pour ces trois
+     * derniers), `status` (DRAFT, PUBLISHED ou WITHDRAWN) et `studioId`
+     * (UUID, ou null pour détacher le film de son studio).
+     * Le changement de statut est appliqué directement, sans passer par
+     * ContentLifecycleService : un passage en PUBLISHED ne valide donc pas le studio.
+     * Les modifications ne sont enregistrées (flush) que si tout le corps est valide.
+     *
+     * @return JsonResponse 200 fiche détaillée à jour ; 400 JSON, titre, statut ou studioId
+     *                      invalide ; 404 film ou studio introuvable
+     */
     #[Route('/{id}', name: 'admin_films_update', methods: ['PATCH'])]
     public function update(string $id, Request $request): JsonResponse
     {
@@ -132,6 +174,8 @@ class AdminFilmController extends AbstractController
             $previous = $film->getStatus();
             $film->setStatus($newStatus);
             // Synchroniser les timestamps si bascule manuelle.
+            // publishedAt n'est posé qu'à la première publication (une republication
+            // après retrait garde la date d'origine) ; withdrawnAt à chaque retrait.
             if ($newStatus === Film::STATUS_PUBLISHED && $previous !== Film::STATUS_PUBLISHED && $film->getPublishedAt() === null) {
                 $film->setPublishedAt(new \DateTimeImmutable());
             }
@@ -162,6 +206,13 @@ class AdminFilmController extends AbstractController
         return $this->json($this->serializeWithStudio($film, true));
     }
 
+    /**
+     * Supprime définitivement un film de la base (à distinguer du retrait
+     * WITHDRAWN, qui le masque sans l'effacer). Les fichiers Bunny ne sont pas
+     * supprimés.
+     *
+     * @return Response 204 sans contenu ; 400 UUID mal formé ; 404 film introuvable
+     */
     #[Route('/{id}', name: 'admin_films_delete', methods: ['DELETE'])]
     public function delete(string $id): Response
     {
@@ -197,6 +248,8 @@ class AdminFilmController extends AbstractController
 
     /**
      * Sérialise un film avec le studio enrichi (résumé) plutôt que juste l'id.
+     *
+     * @param bool $expand true : relations complètes (vue détail) ; false : forme allégée (liste)
      */
     private function serializeWithStudio(Film $film, bool $expand = false): array
     {

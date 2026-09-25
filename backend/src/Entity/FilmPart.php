@@ -14,6 +14,10 @@ use Symfony\Component\Uid\Uuid;
  *
  * Les parties sont ordonnées par `number` (1-based) et portent chacune leur
  * propre chemin Bunny, d'où est construite l'URL HLS de lecture.
+ *
+ * Seule la commande d'import `app:catalogue:import-bunny` crée des parties :
+ * un film créé via le module Studio n'en a pas. Pas de repository dédié
+ * (accès via Film::getParts()). Contrainte d'unicité (film_id, number).
  */
 #[ORM\Entity]
 #[ORM\Table(name: 'film_part')]
@@ -24,6 +28,10 @@ class FilmPart
     #[ORM\Column(type: 'uuid', unique: true)]
     private Uuid $id;
 
+    /**
+     * Film parent — côté propriétaire. FK en ON DELETE CASCADE : les parties
+     * disparaissent aussi quand le film est supprimé directement en SQL.
+     */
     #[ORM\ManyToOne(targetEntity: Film::class, inversedBy: 'parts')]
     #[ORM\JoinColumn(name: 'film_id', referencedColumnName: 'id', nullable: false, onDelete: 'CASCADE')]
     private Film $film;
@@ -32,6 +40,7 @@ class FilmPart
     #[ORM\Column]
     private int $number;
 
+    /** Libellé de la partie (à l'import : nom du dossier Bunny de la vidéo). */
     #[ORM\Column(length: 255)]
     private string $title;
 
@@ -54,6 +63,11 @@ class FilmPart
     public function getBunnyVideoId(): string { return $this->bunnyVideoId; }
     public function setBunnyVideoId(string $id): static { $this->bunnyVideoId = $id; return $this; }
 
+    /**
+     * Sérialise la partie : id, number, title, bunnyVideoId.
+     *
+     * @return array<string, mixed>
+     */
     public function toArray(): array
     {
         return [

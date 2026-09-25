@@ -63,6 +63,12 @@ class StudioSubscription
     #[ORM\Column]
     private \DateTimeImmutable $subscribedAt;
 
+    /**
+     * Crée le lien « user suit studio », daté de maintenant. L'entité est
+     * immuable (pas de setters) : se désabonner revient à supprimer la ligne.
+     * Le contrôle de doublon est fait par l'appelant
+     * (StudioPublicController::subscribe), la contrainte unique restant le filet.
+     */
     public function __construct(User $user, Studio $studio)
     {
         $this->id = Uuid::v4();

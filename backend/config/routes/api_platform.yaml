@@ -1,3 +1,5 @@
+# Routes générées par API Platform (point d'entrée GET /api avec la page
+# Swagger UI, spécification OpenAPI), toutes préfixées par /api.
 api_platform:
     resource: .
     type: api_platform

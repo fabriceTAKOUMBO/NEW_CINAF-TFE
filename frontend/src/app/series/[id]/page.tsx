@@ -14,6 +14,8 @@ import Link from "next/link";
 import { discover, type DiscoverWork } from "@/lib/api";
 import WorkDetailHero from "@/components/WorkDetailHero";
 import WorkDetailTabs from "@/components/WorkDetailTabs";
+import NotFoundView from "@/components/NotFoundView";
+import ContentWithdrawnView, { withdrawnInfoFrom, type WithdrawnInfo } from "@/components/ContentWithdrawnView";
 
 /**
  * Fiche détaillée d'une série télévisée.
@@ -24,7 +26,9 @@ import WorkDetailTabs from "@/components/WorkDetailTabs";
  * - Affiche le hero cinématographique (`WorkDetailHero`) avec bouton « Lire S.1 Ép.1 ».
  * - Délègue aux onglets (`WorkDetailTabs`) le sélecteur de saison, la grille
  *   d'épisodes, le contenu associé et les détails.
- * 
+ * - Série retirée de la plateforme (API 410) → écran « contenu retiré » ;
+ *   série inconnue (API 404) → écran « page introuvable ».
+ *
  * @returns La vue détaillée de la série.
  */
 export default function SerieDetailPage() {
@@ -34,11 +38,15 @@ export default function SerieDetailPage() {
   const [work, setWork] = useState<DiscoverWork | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [notFound, setNotFound] = useState(false);
+  const [withdrawn, setWithdrawn] = useState<WithdrawnInfo | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setError(null);
+    setNotFound(false);
+    setWithdrawn(null);
     discover
       .get(slug)
       .then((w) => {
@@ -51,9 +59,16 @@ export default function SerieDetailPage() {
       })
       .catch((err: unknown) => {
         if (cancelled) return;
-        const status = (err as { statusCode?: number })?.statusCode;
-        const msg = (err as { message?: string })?.message ?? "Erreur inconnue";
-        setError(status === 404 ? "Série introuvable." : msg);
+        const gone = withdrawnInfoFrom(err, "serie");
+        if (gone) {
+          setWithdrawn(gone);
+          return;
+        }
+        if ((err as { statusCode?: number })?.statusCode === 404) {
+          setNotFound(true);
+          return;
+        }
+        setError((err as { message?: string })?.message ?? "Erreur inconnue");
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -79,6 +94,21 @@ export default function SerieDetailPage() {
           Voir la fiche film
         </Link>
       </div>
+    );
+  }
+
+  if (withdrawn) {
+    return <ContentWithdrawnView {...withdrawn} />;
+  }
+
+  if (notFound) {
+    return (
+      <NotFoundView
+        title="Cette série est introuvable"
+        message="Aucune série ne correspond à cette adresse sur CINAF. Le lien est peut-être incomplet, ou la série a changé d'adresse."
+        backHref="/series"
+        backLabel="Voir toutes les séries"
+      />
     );
   }
 

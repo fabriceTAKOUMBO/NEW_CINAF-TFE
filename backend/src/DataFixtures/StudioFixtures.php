@@ -20,11 +20,28 @@ use Symfony\Component\PasswordHasher\Hasher\UserPasswordHasherInterface;
  * so running the loader multiple times (with --append) is safe.
  *
  * Only runs in `dev` and `test` environments — never in `prod`.
+ *
+ * En français : crée les 10 studios de démonstration et leurs comptes
+ * propriétaires (ROLE_CREATEUR), avec le mot de passe commun `Producer1234!`.
+ * Les emails suivent le nom de la ville ou de la région du studio
+ * (`nollywood@cinaf.com`, `ouaga@cinaf.com`, ... `yaounde@cinaf.com`, voir
+ * STUDIOS). Chaque studio reçoit le dossier Bunny `studios/{slug}/` et est
+ * créé déjà validé : ses publications partent directement en PUBLISHED.
+ *
+ * L'import du catalogue Bunny (`app:catalogue:import-bunny`) exige au moins
+ * 10 studios actifs et répartit les œuvres entre les 10 premiers par ordre de
+ * slug : sur une base fraîche, ce sont ces studios-là.
+ *
+ * Chargement ciblé : `php bin/console doctrine:fixtures:load --group=studio --append`
+ * (AppFixtures est chargée d'abord, cf. getDependencies()).
  */
 class StudioFixtures extends Fixture implements DependentFixtureInterface, FixtureGroupInterface
 {
     /**
      * Canonical seed list — must match exactly across all agents (1..6).
+     *
+     * Une ligne par studio : nom affiché, slug (unique, utilisé dans les chemins
+     * Bunny), email du propriétaire et dossier Bunny racine `studios/{slug}/`.
      *
      * @var list<array{name: string, slug: string, email: string, bunnyFolder: string}>
      */
@@ -48,16 +65,26 @@ class StudioFixtures extends Fixture implements DependentFixtureInterface, Fixtu
     ) {
     }
 
+    /**
+     * Groupes permettant de charger cette fixture seule (`--group=studio`) ;
+     * `producer` est l'ancien nom, conservé depuis le renommage producer → studio.
+     */
     public static function getGroups(): array
     {
         return ['producer', 'studio'];
     }
 
+    /**
+     * AppFixtures (compte admin) est chargée avant celle-ci.
+     */
     public function getDependencies(): array
     {
         return [AppFixtures::class];
     }
 
+    /**
+     * Crée chaque couple propriétaire + studio absent de la base, puis flush en une fois.
+     */
     public function load(ObjectManager $manager): void
     {
         // Producer fixtures only in dev/test (parity with AppFixtures admin).

@@ -17,6 +17,12 @@ use Symfony\Component\HttpFoundation\Response;
  *
  * Depends on: CatalogueReferenceController, Genre / Country / Language / Person entities.
  *
+ * En français : vérifie que les quatre référentiels répondent 200 en JSON,
+ * sans authentification. Les contrôles de champs ne s'exécutent que si la
+ * liste renvoyée n'est pas vide ; or la base de test est migrée sans
+ * fixtures et aucun code ne crée ces référentiels : en pratique, seuls le
+ * code HTTP, le type tableau et le Content-Type sont vérifiés.
+ *
  * Run: php bin/phpunit tests/Controller/CatalogueReferenceControllerTest.php
  */
 class CatalogueReferenceControllerTest extends ApiTestCase
@@ -26,7 +32,7 @@ class CatalogueReferenceControllerTest extends ApiTestCase
     // -----------------------------------------------------------------------
 
     /**
-     * GET /api/genres → 200, array list with at least {id, nom} per item.
+     * GET /api/genres → 200, array list with at least {id, name} per item.
      */
     public function testGetGenres(): void
     {
@@ -39,6 +45,8 @@ class CatalogueReferenceControllerTest extends ApiTestCase
         $items = $body['data'] ?? $body;
         $this->assertIsArray($items, 'Genres response must be an array.');
 
+        // Contrôle conditionnel (idem dans les tests suivants) : ignoré si la
+        // liste est vide, ce qui est le cas en base de test (voir l'en-tête).
         if (count($items) > 0) {
             $this->assertArrayHasKey('id', $items[0], 'Genre item must have an "id" field.');
             $this->assertArrayHasKey('name', $items[0], 'Genre item must have a "name" field.');
@@ -62,7 +70,7 @@ class CatalogueReferenceControllerTest extends ApiTestCase
     // -----------------------------------------------------------------------
 
     /**
-     * GET /api/countries → 200, array list with at least {id, nom, codeIso} per item.
+     * GET /api/countries → 200, array list with at least {id, name, isoCode} per item.
      */
     public function testGetCountries(): void
     {
@@ -97,7 +105,8 @@ class CatalogueReferenceControllerTest extends ApiTestCase
     // -----------------------------------------------------------------------
 
     /**
-     * GET /api/languages → 200, array list with {id, nom, codeIso}.
+     * GET /api/languages → 200, array list with at least {id, name} per item
+     * (isoCode is returned but not asserted).
      */
     public function testGetLanguages(): void
     {
@@ -131,7 +140,7 @@ class CatalogueReferenceControllerTest extends ApiTestCase
     // -----------------------------------------------------------------------
 
     /**
-     * GET /api/persons → 200, array list with {id, nom} per item.
+     * GET /api/persons → 200, array list with at least {id, firstName} per item.
      */
     public function testGetPersons(): void
     {
@@ -181,6 +190,11 @@ class CatalogueReferenceControllerTest extends ApiTestCase
         );
     }
 
+    /**
+     * Fournisseur de données : les quatre URL de référentiel, indexées par nom.
+     *
+     * @return array<string, array{0: string}>
+     */
     public static function referenceEndpointsProvider(): array
     {
         return [

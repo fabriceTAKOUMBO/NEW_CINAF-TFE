@@ -17,11 +17,19 @@ use Symfony\Component\HttpFoundation\Response;
  * `isValidated=true` ET au moins un Film ou Serie en `status='PUBLISHED'`.
  * Tous les autres cas mappent vers 404 (pas 403) pour ne pas leaker
  * l'existence de studios non publics.
+ *
+ * Couvre la liste (`/api/studios`), la fiche (`/{slug}`), les œuvres
+ * (`/{slug}/works`) et la recherche (`/search`). Les studios sont créés par
+ * StudioTestTrait::createCreatorWithStudio() (actifs et validés, slugs
+ * uniques) dans la base de test, sans appel réseau.
+ *
+ * Lancement : `php bin/phpunit tests/Controller/StudioPublicControllerTest.php`.
  */
 final class StudioPublicControllerTest extends ApiTestCase
 {
     use StudioTestTrait;
 
+    /** Un studio avec un film publié figure dans la liste ; un studio sans contenu n'y figure pas. */
     public function testListReturnsOnlyStudiosWithPublishedContent(): void
     {
         $client = static::createClient();
@@ -43,6 +51,7 @@ final class StudioPublicControllerTest extends ApiTestCase
         $this->assertNotContains($studioB->getName(), $names);
     }
 
+    /** Des studios qui n'ont que du DRAFT ou du WITHDRAWN sont absents de la liste. */
     public function testListExcludesStudiosWithDraftOrWithdrawnOnly(): void
     {
         $client = static::createClient();
@@ -63,6 +72,7 @@ final class StudioPublicControllerTest extends ApiTestCase
         $this->assertNotContains($studioWithdrawn->getName(), $names);
     }
 
+    /** Fiche studio : compteurs limités au contenu publié (2 films, 1 série) et `ownerId` masqué. */
     public function testGetByPublicSlugReturnsStudioWithCounts(): void
     {
         $client = static::createClient();
@@ -86,6 +96,7 @@ final class StudioPublicControllerTest extends ApiTestCase
         $this->assertArrayNotHasKey('ownerId', $body);
     }
 
+    /** Fiche d'un studio existant mais sans contenu publié : 404. */
     public function testGetByPublicSlugReturns404IfNoPublishedContent(): void
     {
         $client = static::createClient();
@@ -100,6 +111,7 @@ final class StudioPublicControllerTest extends ApiTestCase
         $this->assertSame(Response::HTTP_NOT_FOUND, $resp->getStatusCode());
     }
 
+    /** `/works` ne renvoie que le film et la série publiés (ni brouillon ni retiré), chacun avec son `kind`. */
     public function testGetWorksReturnsOnlyPublishedFilmsAndSeries(): void
     {
         $client = static::createClient();
@@ -128,6 +140,7 @@ final class StudioPublicControllerTest extends ApiTestCase
         }
     }
 
+    /** La recherche par nom trouve le studio public et exclut un studio dont le nom contient aussi le terme mais sans contenu publié. */
     public function testSearchByNameReturnsMatchingPublicStudios(): void
     {
         $client = static::createClient();
@@ -153,6 +166,7 @@ final class StudioPublicControllerTest extends ApiTestCase
         $this->assertNotContains($hiddenWithNeedle->getName(), $names);
     }
 
+    /** Recherche avec un seul caractère : 200 et tableau vide. */
     public function testSearchReturnsEmptyArrayWhenQueryTooShort(): void
     {
         $client = static::createClient();
@@ -167,6 +181,7 @@ final class StudioPublicControllerTest extends ApiTestCase
     // Helpers internes — création de contenu pour les tests.
     // ----------------------------------------------------------------
 
+    /** Crée un film au statut donné, avec titre et slug uniques, rattaché au studio. */
     private function seedFilm(EntityManagerInterface $em, Studio $studio, string $status): Film
     {
         $uid = bin2hex(random_bytes(4));
@@ -183,6 +198,7 @@ final class StudioPublicControllerTest extends ApiTestCase
         return $film;
     }
 
+    /** Crée une série au statut donné, avec titre et slug uniques, rattachée au studio. */
     private function seedSerie(EntityManagerInterface $em, Studio $studio, string $status): Serie
     {
         $uid = bin2hex(random_bytes(4));

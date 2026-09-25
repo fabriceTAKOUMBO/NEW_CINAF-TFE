@@ -17,6 +17,14 @@ use Doctrine\Migrations\AbstractMigration;
  * - published_at TIMESTAMP NULL
  * - withdrawn_at TIMESTAMP NULL
  * - composite index (status, studio_id)
+ *
+ * En français : rattache chaque film et chaque série à un studio et introduit
+ * le cycle de vie du contenu (colonne `status`, DRAFT par défaut, et dates de
+ * publication / de retrait). `studio_id` reste nullable ici, le temps que
+ * l'import du catalogue le renseigne ; il devient NOT NULL avec
+ * Version20260430200000. Le statut PENDING_APPROVAL, ajouté ensuite, tient dans
+ * le même VARCHAR(20) sans changement de schéma (cf. Version20260514114920).
+ * L'index (status, studio_id) sert les listes filtrées par studio et par statut.
  */
 final class Version20260430100100 extends AbstractMigration
 {

@@ -13,6 +13,8 @@ import Link from "next/link";
 import { discover, type DiscoverWork } from "@/lib/api";
 import WorkDetailHero from "@/components/WorkDetailHero";
 import WorkDetailTabs from "@/components/WorkDetailTabs";
+import NotFoundView from "@/components/NotFoundView";
+import ContentWithdrawnView, { withdrawnInfoFrom, type WithdrawnInfo } from "@/components/ContentWithdrawnView";
 
 /**
  * Fiche détaillée d'un film.
@@ -23,7 +25,9 @@ import WorkDetailTabs from "@/components/WorkDetailTabs";
  * - Restitue le hero cinématographique (`WorkDetailHero`) avec bouton direct "Regarder".
  * - Affiche les onglets de la fiche (`WorkDetailTabs`) : parties du film si
  *   l'œuvre est découpée, contenu associé, détails.
- * 
+ * - Film retiré de la plateforme (API 410) → écran « contenu retiré » ;
+ *   film inconnu (API 404) → écran « page introuvable ».
+ *
  * @returns La vue détaillée du film.
  */
 export default function FilmDetailPage() {
@@ -33,11 +37,15 @@ export default function FilmDetailPage() {
   const [work, setWork] = useState<DiscoverWork | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [notFound, setNotFound] = useState(false);
+  const [withdrawn, setWithdrawn] = useState<WithdrawnInfo | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setError(null);
+    setNotFound(false);
+    setWithdrawn(null);
     discover
       .get(slug)
       .then((w) => {
@@ -50,9 +58,16 @@ export default function FilmDetailPage() {
       })
       .catch((err: unknown) => {
         if (cancelled) return;
-        const status = (err as { statusCode?: number })?.statusCode;
-        const msg = (err as { message?: string })?.message ?? "Erreur inconnue";
-        setError(status === 404 ? "Film introuvable." : msg);
+        const gone = withdrawnInfoFrom(err, "film");
+        if (gone) {
+          setWithdrawn(gone);
+          return;
+        }
+        if ((err as { statusCode?: number })?.statusCode === 404) {
+          setNotFound(true);
+          return;
+        }
+        setError((err as { message?: string })?.message ?? "Erreur inconnue");
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -78,6 +93,21 @@ export default function FilmDetailPage() {
           Voir la fiche série
         </Link>
       </div>
+    );
+  }
+
+  if (withdrawn) {
+    return <ContentWithdrawnView {...withdrawn} />;
+  }
+
+  if (notFound) {
+    return (
+      <NotFoundView
+        title="Ce film est introuvable"
+        message="Aucun film ne correspond à cette adresse sur CINAF. Le lien est peut-être incomplet, ou le film a changé d'adresse."
+        backHref="/films"
+        backLabel="Voir tous les films"
+      />
     );
   }
 

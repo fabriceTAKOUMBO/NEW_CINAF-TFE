@@ -1,13 +1,17 @@
 # see https://symfony.com/doc/current/reference/configuration/framework.html
 framework:
+    # Secret de l'application (signatures internes de Symfony), fourni par l'environnement.
     secret: '%env(APP_SECRET)%'
 
     # Note that the session will be started ONLY if you read or write from it.
+    # L'API elle-même n'en utilise pas : le pare-feu `api` est stateless (JWT).
     session: true
 
     #esi: true
     #fragments: true
 
+# En test : active les services de test (client HTTP de WebTestCase, conteneur
+# de test) et stocke les sessions éventuelles dans des fichiers simulés.
 when@test:
     framework:
         test: true

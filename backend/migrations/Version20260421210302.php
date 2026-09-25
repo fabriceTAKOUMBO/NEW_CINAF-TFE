@@ -9,6 +9,16 @@ use Doctrine\Migrations\AbstractMigration;
 
 /**
  * Auto-generated Migration: Please modify to your needs!
+ *
+ * Sprint 1 — création de la table `user` (comptes de la plateforme) :
+ * identifiant UUID, email unique (index UNIQ_8D93D649E7927C74), rôles stockés
+ * en JSON, mot de passe haché, prénom et nom, vérification d'email
+ * (`is_verified`, `verification_token`), réinitialisation du mot de passe
+ * (jeton + date d'expiration), consentement RGPD et horodatages.
+ *
+ * `user` est un mot réservé de PostgreSQL : le nom de table est donc toujours
+ * écrit entre guillemets. Les colonnes ajoutées plus tard (ex. `is_suspended`)
+ * viennent des migrations suivantes.
  */
 final class Version20260421210302 extends AbstractMigration
 {

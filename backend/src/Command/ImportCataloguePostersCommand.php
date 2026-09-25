@@ -36,6 +36,26 @@ use Symfony\Component\Console\Style\SymfonyStyle;
  * fois. **Toutes les correspondances non exactes sont listées dans le rapport**
  * afin d'être relues : une affiche attribuée au mauvais film est possible sur
  * les scores les plus bas (`MR_ASSA` ressemble à `mme-assa`).
+ *
+ * Seules les œuvres importées (`bunnyFolder` renseigné) sont appariées : le
+ * contenu des studios garde ses propres visuels. L'URL enregistrée dans
+ * `poster` est l'URL publique de l'image, servie par la pull zone de la zone
+ * des visuels (ex. `https://cinaf-engine.b-cdn.net/...`).
+ *
+ * Options :
+ *  - `--dry-run`      : calcule et affiche le rapport sans rien écrire en base ;
+ *  - `--min-score=80` : seuil (0-100) de la passe « approchée » ;
+ *  - `--sitemap=`     : sitemap local à utiliser au lieu de le télécharger ;
+ *  - `--fill-missing` : donne en plus une affiche ARBITRAIRE (d'un autre titre)
+ *                       à toute œuvre restée sans affiche, contenu studio compris.
+ *
+ * Accès réseau : téléchargement du sitemap (sauf `--sitemap`) et un ou deux
+ * listings Bunny par titre apparié (ainsi que pour les titres de repli avec
+ * `--fill-missing`). Zone des visuels : paramètre
+ * `app.bunny.images_zone`, hébergée dans une autre région (endpoint Storage
+ * propre, voir `config/services.yaml`).
+ *
+ * Exemple : `php bin/console app:catalogue:import-posters --dry-run`.
  */
 #[AsCommand(
     name: 'app:catalogue:import-posters',
@@ -43,7 +63,13 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 )]
 class ImportCataloguePostersCommand extends Command
 {
+    /** Sitemap public de cinaf.tv, seule source reliant un identifiant de titre à son nom. */
     private const SITEMAP_URL = 'https://www.cinaf.tv/sitemap.xml';
+    /**
+     * URL d'une fiche titre en français : groupe 1 = identifiant (UUID de
+     * 36 caractères), groupe 2 = slug lisible du titre. Seules les URL `/fr/`
+     * sont lues.
+     */
     private const TITLE_URL_PATTERN = '#https://www\.cinaf\.tv/fr/titles/([0-9a-f-]{36})/([^<"\s]+)#';
 
     /** Sous-dossiers d'affiche, du plus adapté au moins adapté (format portrait d'abord). */
@@ -52,6 +78,10 @@ class ImportCataloguePostersCommand extends Command
     /** En deçà, une inclusion de nom n'est pas discriminante (« sin » matcherait tout). */
     private const MIN_CONTAINMENT_LENGTH = 6;
 
+    /**
+     * @param string $imagesZone Zone Bunny des visuels (`BUNNY_IMAGES_ZONE`, ex. `cinaf-engine-zone`).
+     * @param string $caBundle   Bundle CA pour télécharger le sitemap en HTTPS (indispensable sous Windows).
+     */
     public function __construct(
         private readonly BunnyZoneRegistry $zones,
         private readonly FilmRepository $filmRepo,
@@ -87,6 +117,14 @@ class ImportCataloguePostersCommand extends Command
         );
     }
 
+    /**
+     * Enchaîne : chargement des titres cinaf.tv, sélection des œuvres importées,
+     * appariement, recherche du fichier d'affiche de chaque titre retenu,
+     * écriture (un seul flush) puis rapport.
+     *
+     * @return int Command::FAILURE si le sitemap est illisible ou vide ;
+     *             Command::SUCCESS sinon (y compris sans aucune œuvre importée).
+     */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $io = new SymfonyStyle($input, $output);
@@ -173,6 +211,9 @@ class ImportCataloguePostersCommand extends Command
         array $served,
         bool $dryRun,
     ): array {
+        // Toutes les œuvres en base, quel que soit leur statut ou leur origine.
+        // $served écarte celles déjà servies par l'appariement (utile en dry-run,
+        // où leur champ `poster` est resté vide).
         $missing = array_filter(
             array_merge($this->filmRepo->findAll(), $this->serieRepo->findAll()),
             static fn($w) => $w->getPoster() === null && !isset($served[spl_object_id($w)]),
@@ -182,6 +223,8 @@ class ImportCataloguePostersCommand extends Command
         }
 
         // Pool des affiches réellement disponibles parmi les titres libres.
+        // On s'arrête dès qu'il y a une affiche par œuvre à servir, pour limiter
+        // les appels Bunny.
         $pool = [];
         foreach ($titles as $title) {
             if (isset($usedTitles[$title['id']])) {
@@ -201,6 +244,7 @@ class ImportCataloguePostersCommand extends Command
 
         $filled = [];
         foreach (array_values($missing) as $i => $work) {
+            // Distribution circulaire : le pool n'est réutilisé que s'il est plus petit que la liste.
             $pick = $pool[$i % count($pool)];
             if (!$dryRun) {
                 $work->setPoster($pick['url']);
@@ -210,13 +254,22 @@ class ImportCataloguePostersCommand extends Command
         return $filled;
     }
 
-    /** Première image trouvée pour un titre, format portrait en priorité. */
+    /**
+     * Première image trouvée pour un titre, format portrait en priorité.
+     *
+     * Les noms de fichiers étant imprévisibles, il faut lister le dossier :
+     * le premier fichier (ordre alphabétique de listContents()) est retenu.
+     *
+     * @return string|null URL publique de l'image, null si aucun fichier n'a été trouvé.
+     */
     private function resolvePosterUrl(BunnyStorageService $storage, string $titleId): ?string
     {
         foreach (self::POSTER_DIRS as $dir) {
             try {
                 $listing = $storage->listContents("titles/$titleId/$dir", false);
             } catch (\Throwable) {
+                // Toute erreur de listing (réseau, clé refusée…) revient à
+                // « pas d'affiche ici » : on essaie le dossier suivant.
                 continue;
             }
             if (!empty($listing['files'])) {
@@ -246,6 +299,15 @@ class ImportCataloguePostersCommand extends Command
 
     /**
      * Table {titleId → slug} extraite du sitemap public de cinaf.tv.
+     *
+     * Chaque identifiant n'est retenu qu'une fois (première URL rencontrée) ;
+     * `norm` est le slug normalisé, prêt pour la comparaison avec les titres
+     * en base.
+     *
+     * @param string|null $localPath Sitemap local (option `--sitemap`) ; null ou vide = téléchargement.
+     *
+     * @throws \RuntimeException si le fichier local est illisible (les erreurs
+     *                           HTTP du téléchargement remontent via Guzzle).
      *
      * @return list<array{id:string, slug:string, norm:string}>
      */
@@ -310,6 +372,7 @@ class ImportCataloguePostersCommand extends Command
         }, 'inclusion');
 
         // Passe 3 — similarité approximative au-dessus du seuil.
+        // similar_text() fournit un pourcentage de ressemblance ; seuil = --min-score.
         $pending = $this->pass($pending, $titles, $usedTitles, $matched, function (string $workNorm, array $title) use ($minScore) {
             similar_text($workNorm, $title['norm'], $pct);
             return $pct >= $minScore ? $pct : null;
@@ -341,6 +404,8 @@ class ImportCataloguePostersCommand extends Command
     ): array {
         $stillPending = [];
 
+        // Appariement glouton : les œuvres sont traitées dans l'ordre et chacune
+        // prend le titre libre au meilleur score (à égalité, le premier trouvé).
         foreach ($pending as $work) {
             $workNorm = $this->normalize($work->getTitle());
             $best = null;
@@ -386,6 +451,10 @@ class ImportCataloguePostersCommand extends Command
     }
 
     /**
+     * Affiche le rapport : compteurs par niveau de confiance, puis les listes
+     * à relire (correspondances non exactes triées par score croissant, titres
+     * sans fichier d'affiche, œuvres sans correspondance, affiches arbitraires).
+     *
      * @param array{matched: list<array<string,mixed>>, unmatched: list<string>} $matches
      * @param list<string>                                                      $noAsset
      * @param list<array{work:Film|Serie, slug:string}>                         $filled

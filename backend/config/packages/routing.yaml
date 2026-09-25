@@ -4,6 +4,8 @@ framework:
         # See https://symfony.com/doc/current/routing.html#generating-urls-in-commands
         default_uri: '%env(DEFAULT_URI)%'
 
+# En production, les paramètres ne sont plus confrontés aux `requirements` des
+# routes lors de la génération d'une URL (réglage recommandé par Symfony en prod).
 when@prod:
     framework:
         router:

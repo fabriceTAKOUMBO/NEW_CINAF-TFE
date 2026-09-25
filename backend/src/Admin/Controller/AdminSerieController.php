@@ -16,11 +16,24 @@ use Symfony\Component\Uid\Uuid;
 
 /**
  * Endpoints admin pour la gestion globale des séries, tous studios confondus.
+ *
+ * Préfixe `/api/admin/series`, ROLE_ADMIN (`#[IsGranted]` + `access_control`).
+ * Même logique que AdminFilmController :
+ *  - GET    /       liste paginée filtrable (statut, studio, titre)
+ *  - GET    /{id}   fiche détaillée
+ *  - PATCH  /{id}   modération / correction (métadonnées, statut, studio)
+ *  - DELETE /{id}   suppression définitive
+ * Ce contrôleur ne touche ni aux saisons ni aux épisodes (gérés dans l'espace
+ * studio) ; l'approbation des séries PENDING_APPROVAL passe par AdminApprovalController.
  */
 #[Route('/api/admin/series')]
 #[IsGranted('ROLE_ADMIN')]
 class AdminSerieController extends AbstractController
 {
+    /**
+     * Statuts acceptés en filtre de liste et en PATCH. PENDING_APPROVAL en est
+     * exclu : il ne s'obtient que par la publication d'un studio non validé.
+     */
     private const ALLOWED_STATUSES = [
         Serie::STATUS_DRAFT,
         Serie::STATUS_PUBLISHED,
@@ -34,6 +47,16 @@ class AdminSerieController extends AbstractController
     ) {
     }
 
+    /**
+     * Liste paginée de toutes les séries, de la plus récemment créée à la plus ancienne.
+     *
+     * Paramètres de requête : `page` (défaut 1), `limit` (défaut 20, borné à 1..100),
+     * `status` (DRAFT, PUBLISHED ou WITHDRAWN), `studioId` (UUID), `search`
+     * (sous-chaîne du titre, insensible à la casse).
+     *
+     * @return JsonResponse 200 `{data, total, page, limit}` (chaque série avec un résumé
+     *                      de son studio) ; 400 statut ou studioId invalide
+     */
     #[Route('', name: 'admin_series_list', methods: ['GET'])]
     public function list(Request $request): JsonResponse
     {
@@ -67,6 +90,11 @@ class AdminSerieController extends AbstractController
         ]);
     }
 
+    /**
+     * Renvoie la fiche détaillée d'une série (relations complètes + résumé du studio).
+     *
+     * @return JsonResponse 200 ; 400 UUID mal formé ; 404 série introuvable
+     */
     #[Route('/{id}', name: 'admin_series_get', methods: ['GET'])]
     public function getOne(string $id): JsonResponse
     {
@@ -78,6 +106,19 @@ class AdminSerieController extends AbstractController
         return $this->json($this->serializeWithStudio($serie, true));
     }
 
+    /**
+     * Modifie une série (mise à jour partielle : seuls les champs présents sont traités).
+     *
+     * Champs acceptés : `title` (non vide), `synopsis`, `year`, `poster`,
+     * `trailerVideoId` (null accepté pour ces deux derniers), `status` (DRAFT,
+     * PUBLISHED ou WITHDRAWN) et `studioId` (UUID, ou null pour détacher la série).
+     * Le changement de statut est appliqué directement, sans passer par
+     * ContentLifecycleService : un passage en PUBLISHED ne valide donc pas le studio.
+     * Les modifications ne sont enregistrées (flush) que si tout le corps est valide.
+     *
+     * @return JsonResponse 200 fiche détaillée à jour ; 400 JSON, titre, statut ou studioId
+     *                      invalide ; 404 série ou studio introuvable
+     */
     #[Route('/{id}', name: 'admin_series_update', methods: ['PATCH'])]
     public function update(string $id, Request $request): JsonResponse
     {
@@ -122,6 +163,7 @@ class AdminSerieController extends AbstractController
             }
             $previous = $serie->getStatus();
             $serie->setStatus($newStatus);
+            // publishedAt n'est posé qu'à la première publication ; withdrawnAt à chaque retrait.
             if ($newStatus === Serie::STATUS_PUBLISHED && $previous !== Serie::STATUS_PUBLISHED && $serie->getPublishedAt() === null) {
                 $serie->setPublishedAt(new \DateTimeImmutable());
             }
@@ -152,6 +194,13 @@ class AdminSerieController extends AbstractController
         return $this->json($this->serializeWithStudio($serie, true));
     }
 
+    /**
+     * Supprime définitivement une série, avec ses saisons et leurs épisodes
+     * (cascade Doctrine `remove`). À distinguer du retrait WITHDRAWN, qui la
+     * masque sans l'effacer. Les fichiers Bunny ne sont pas supprimés.
+     *
+     * @return Response 204 sans contenu ; 400 UUID mal formé ; 404 série introuvable
+     */
     #[Route('/{id}', name: 'admin_series_delete', methods: ['DELETE'])]
     public function delete(string $id): Response
     {
@@ -166,6 +215,9 @@ class AdminSerieController extends AbstractController
         return new Response('', 204);
     }
 
+    /**
+     * Parse l'UUID et charge la série, ou renvoie la JsonResponse d'erreur (400/404).
+     */
     private function resolveSerie(string $id): Serie|JsonResponse
     {
         try {
@@ -182,6 +234,12 @@ class AdminSerieController extends AbstractController
         return $serie;
     }
 
+    /**
+     * Sérialise une série avec un résumé de son studio (id, nom, slug) plutôt que
+     * son seul identifiant.
+     *
+     * @param bool $expand true : relations complètes (vue détail) ; false : forme allégée (liste)
+     */
     private function serializeWithStudio(Serie $serie, bool $expand = false): array
     {
         $row = $serie->toArray($expand);

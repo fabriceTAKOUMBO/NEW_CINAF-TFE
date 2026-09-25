@@ -1,9 +1,15 @@
+# Access tokens JWT signés en RS256 : clé privée pour signer, clé publique pour
+# vérifier (config/jwt/*.pem ; sous Windows, les générer avec OpenSSL). Le
+# payload porte l'email dans le claim `username` (pas de `sub`).
 lexik_jwt_authentication:
     secret_key: '%env(resolve:JWT_SECRET_KEY)%'
     public_key: '%env(resolve:JWT_PUBLIC_KEY)%'
     pass_phrase: '%env(JWT_PASSPHRASE)%'
+    # Durée de vie courte : 900 s = 15 minutes, renouvelée via /api/auth/refresh.
     token_ttl: 900
+    # Aucune tolérance sur l'heure d'expiration.
     clock_skew: 0
+    # Le jeton est lu uniquement dans l'en-tête `Authorization: Bearer <jwt>`.
     token_extractors:
         authorization_header:
             enabled: true

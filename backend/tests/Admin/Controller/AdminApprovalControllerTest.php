@@ -23,11 +23,32 @@ use Symfony\Component\Uid\Uuid;
  * NB : tous les tests bootent le kernel une seule fois via `createClient()`
  * en début de test, puis instancient les entités via l'EM directement
  * (le kernel Symfony refuse un double-boot).
+ *
+ * Contrôleur testé : App\Admin\Controller\AdminApprovalController. Règles
+ * vérifiées : le premier contenu d'un studio non validé
+ * (`Studio.isValidated = false`) attend en PENDING_APPROVAL ; l'approbation le
+ * publie (PUBLISHED) ET valide le studio ; le refus le renvoie en DRAFT sans
+ * valider le studio ; approuver un contenu qui n'est pas en attente donne 409 ;
+ * un non-admin, même créateur du contenu, reçoit 403. Le refus d'une série
+ * (`/series/{id}/reject`) n'a pas de test dédié dans ce fichier.
+ *
+ * Données : chaque test crée son créateur + studio (StudioTestTrait, qui le
+ * crée déjà validé : on le repasse à `isValidated = false` quand le scénario
+ * l'exige), ses contenus directement au statut voulu (sans passer par l'API de
+ * publication) et un administrateur dédié (createAdminToken()).
+ *
+ * Lancement : `php bin/phpunit tests/Admin/Controller/AdminApprovalControllerTest.php`.
  */
 class AdminApprovalControllerTest extends ApiTestCase
 {
     use StudioTestTrait;
 
+    /**
+     * File d'approbation : un film et une série en PENDING_APPROVAL d'un studio
+     * non validé apparaissent dans `GET /api/admin/approvals` (200, format paginé
+     * `{data, total, page, limit}`), avec leur `kind` (`film` / `serie`) et un
+     * résumé de studio indiquant `isValidated: false`.
+     */
     public function testListReturnsPendingApprovals(): void
     {
         $client = static::createClient();
@@ -44,6 +65,9 @@ class AdminApprovalControllerTest extends ApiTestCase
 
         $adminToken = $this->createAdminToken();
 
+        // Sans `page` ni `limit` : première page de 20 éléments, triée par date
+        // de mise à jour décroissante ; les deux contenus créés ci-dessus, les
+        // plus récents, y figurent donc.
         $response = $this->getJson($client, '/api/admin/approvals', $adminToken);
         $body = $this->assertJsonResponse($response, Response::HTTP_OK);
 
@@ -67,6 +91,10 @@ class AdminApprovalControllerTest extends ApiTestCase
         }
     }
 
+    /**
+     * Approbation d'un film en attente : 200, le film renvoyé est PUBLISHED et,
+     * en base, son studio est désormais validé (`isValidated = true`).
+     */
     public function testApproveFilmPublishesAndValidatesStudio(): void
     {
         $client = static::createClient();
@@ -74,6 +102,8 @@ class AdminApprovalControllerTest extends ApiTestCase
         $em = static::getContainer()->get(EntityManagerInterface::class);
 
         [, $studio, ] = $this->createCreatorWithStudio();
+        // Le trait crée un studio déjà validé : on le repasse en « non validé »
+        // pour reproduire le cas d'un nouveau studio dont le 1er contenu attend.
         $studio->setIsValidated(false);
         $em->flush();
 
@@ -90,11 +120,17 @@ class AdminApprovalControllerTest extends ApiTestCase
         $body = $this->assertJsonResponse($response, Response::HTTP_OK);
         $this->assertSame('PUBLISHED', $body['status']);
 
+        // clear() vide l'identity map de Doctrine : le studio est relu en base,
+        // et non repris de l'objet déjà chargé en mémoire.
         $em->clear();
         $refreshedStudio = $em->getRepository(Studio::class)->find($studio->getId());
         $this->assertTrue($refreshedStudio->isValidated());
     }
 
+    /**
+     * Approuver un film déjà PUBLISHED (studio validé, rien en attente) est
+     * refusé : 409 Conflict, seul un contenu en PENDING_APPROVAL s'approuve.
+     */
     public function testApproveFilmAlreadyPublishedReturns409(): void
     {
         $client = static::createClient();
@@ -115,6 +151,10 @@ class AdminApprovalControllerTest extends ApiTestCase
         $this->assertSame(Response::HTTP_CONFLICT, $response->getStatusCode());
     }
 
+    /**
+     * Refus d'un film en attente : 200, le film repasse en DRAFT (modifiable et
+     * resoumettable par le studio) et, en base, le studio reste non validé.
+     */
     public function testRejectFilmReturnsToDraft(): void
     {
         $client = static::createClient();
@@ -129,6 +169,8 @@ class AdminApprovalControllerTest extends ApiTestCase
 
         $adminToken = $this->createAdminToken();
 
+        // Le motif `reason` est accepté mais ni lu ni enregistré par le contrôleur
+        // (aucune entité dédiée) : le test ne peut donc pas le vérifier.
         $response = $this->patchJson(
             $client,
             '/api/admin/films/' . $film->getId()->toRfc4122() . '/reject',
@@ -146,6 +188,10 @@ class AdminApprovalControllerTest extends ApiTestCase
         );
     }
 
+    /**
+     * Même règle pour une série : approuver une série en attente la publie
+     * (200, PUBLISHED) et valide son studio en base.
+     */
     public function testApproveSerieAlsoValidatesStudio(): void
     {
         $client = static::createClient();
@@ -174,6 +220,10 @@ class AdminApprovalControllerTest extends ApiTestCase
         $this->assertTrue($refreshedStudio->isValidated());
     }
 
+    /**
+     * Le créateur (ROLE_CREATEUR) ne peut pas approuver, même son propre film :
+     * 403, ROLE_ADMIN étant exigé (`access_control` `^/api/admin` + `#[IsGranted]`).
+     */
     public function testNonAdminCannotApprove403(): void
     {
         $client = static::createClient();
@@ -196,6 +246,10 @@ class AdminApprovalControllerTest extends ApiTestCase
     // Helpers
     // -----------------------------------------------------------------
 
+    /**
+     * Persiste un administrateur (ROLE_ADMIN, email unique) et renvoie son JWT,
+     * forgé directement par JWTTokenManager (sans passer par `/api/auth/login`).
+     */
     private function createAdminToken(): string
     {
         /** @var EntityManagerInterface $em */
@@ -218,6 +272,12 @@ class AdminApprovalControllerTest extends ApiTestCase
         return $jwt->create($admin);
     }
 
+    /**
+     * Persiste un film du studio donné directement au statut voulu (setStatus(),
+     * sans ContentLifecycleService) : c'est ce qui permet de préparer un film
+     * PENDING_APPROVAL ou PUBLISHED. Slug = titre (espaces → tirets) + suffixe
+     * aléatoire, pour rester unique dans une base jamais vidée entre les tests.
+     */
     private function createFilmInStudio(
         EntityManagerInterface $em,
         Studio $studio,
@@ -238,6 +298,7 @@ class AdminApprovalControllerTest extends ApiTestCase
         return $film;
     }
 
+    /** Équivalent de createFilmInStudio() pour une série (sans saison ni épisode). */
     private function createSerieInStudio(
         EntityManagerInterface $em,
         Studio $studio,

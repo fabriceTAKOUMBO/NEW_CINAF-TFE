@@ -10,9 +10,19 @@ use Doctrine\Persistence\ObjectManager;
  *
  * - Mensuel : 9.99€ / mois
  * - Annuel : 99€ / an (≈ 17% de réduction par rapport au mensuel)
+ *
+ * Le nom du plan (« Mensuel » / « Annuel ») sert de clé d'idempotence ; la
+ * commande `app:stripe:sync-plans` s'appuie sur ces mêmes noms. Les prix sont
+ * stockés en centimes, dans la devise par défaut de SubscriptionPlan (EUR).
+ * Contrairement à AppFixtures et StudioFixtures, aucune restriction
+ * d'environnement n'est codée ici.
  */
 class SubscriptionPlanFixtures extends Fixture
 {
+    /**
+     * Crée les plans absents et complète, sur les plans existants, un
+     * `stripePriceId` encore vide lorsque la variable d'environnement est renseignée.
+     */
     public function load(ObjectManager $manager): void
     {
         $repo = $manager->getRepository(SubscriptionPlan::class);
@@ -57,6 +67,8 @@ class SubscriptionPlanFixtures extends Fixture
             if ($existing) {
                 // Si le plan existe déjà mais que le stripePriceId vient d'être renseigné en env,
                 // on rétro-applique pour éviter de devoir purger la table en dev.
+                // Un stripePriceId déjà présent n'est jamais remplacé (changement de
+                // compte Stripe : utiliser `app:stripe:sync-plans`).
                 if ($existing->getStripePriceId() === null && $data['stripePriceId'] !== null) {
                     $existing->setStripePriceId($data['stripePriceId']);
                 }

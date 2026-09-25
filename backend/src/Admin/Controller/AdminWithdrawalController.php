@@ -21,11 +21,21 @@ use Symfony\Component\Uid\Uuid;
 /**
  * Endpoints admin pour gérer les demandes de retrait (WithdrawalRequest)
  * créées par les producteurs : approve / reject.
+ *
+ * Un studio ne retire pas lui-même un contenu publié : il dépose une demande
+ * (statut PENDING, une seule en attente par contenu) que l'admin traite ici.
+ *  - GET  /api/admin/withdrawals               file des demandes (PENDING par défaut)
+ *  - GET  /api/admin/withdrawals/{id}          détail d'une demande
+ *  - POST /api/admin/withdrawals/{id}/approve  APPROVED + contenu passé en WITHDRAWN
+ *  - POST /api/admin/withdrawals/{id}/reject   REJECTED, contenu inchangé
+ * Accès : ROLE_ADMIN (`#[IsGranted]` + `access_control` sur `^/api/admin`).
+ * Une demande déjà traitée ne peut plus l'être à nouveau (409).
  */
 #[Route('/api/admin/withdrawals')]
 #[IsGranted('ROLE_ADMIN')]
 class AdminWithdrawalController extends AbstractController
 {
+    /** Statuts acceptés par le filtre de la liste. */
     private const ALLOWED_STATUSES = [
         WithdrawalRequest::STATUS_PENDING,
         WithdrawalRequest::STATUS_APPROVED,
@@ -41,6 +51,15 @@ class AdminWithdrawalController extends AbstractController
     ) {
     }
 
+    /**
+     * Liste paginée des demandes de retrait, les plus récentes d'abord.
+     *
+     * Paramètres de requête : `page` (défaut 1), `limit` (défaut 20, borné à 1..100),
+     * `status` (PENDING par défaut s'il est absent ; APPROVED ou REJECTED ; une
+     * valeur vide `?status=` lève le filtre et renvoie tous les statuts).
+     *
+     * @return JsonResponse 200 `{data, total, page, limit}` ; 400 statut inconnu
+     */
     #[Route('', name: 'admin_withdrawals_list', methods: ['GET'])]
     public function list(Request $request): JsonResponse
     {
@@ -63,6 +82,11 @@ class AdminWithdrawalController extends AbstractController
         ]);
     }
 
+    /**
+     * Renvoie le détail d'une demande de retrait (studio, demandeur et relecteur inclus).
+     *
+     * @return JsonResponse 200 ; 400 UUID mal formé ; 404 demande introuvable
+     */
     #[Route('/{id}', name: 'admin_withdrawals_get', methods: ['GET'])]
     public function getOne(string $id): JsonResponse
     {
@@ -74,6 +98,18 @@ class AdminWithdrawalController extends AbstractController
         return $this->json($this->serializeWithdrawal($withdrawal));
     }
 
+    /**
+     * Accepte une demande de retrait : le film ou la série visé passe en WITHDRAWN
+     * (ContentLifecycleService, qui date aussi `withdrawnAt`), puis la demande est
+     * marquée APPROVED avec l'admin relecteur, la date et une note facultative.
+     *
+     * Corps JSON facultatif : `{reviewNote}`. Le contenu retiré disparaît du
+     * catalogue public mais reste en base (seul un admin peut le republier).
+     *
+     * @return JsonResponse 200 `{withdrawal, target}` ; 400 UUID mal formé ou type de cible
+     *                      inconnu ; 404 demande ou contenu introuvable ; 409 demande déjà
+     *                      traitée ou contenu déjà retiré
+     */
     #[Route('/{id}/approve', name: 'admin_withdrawals_approve', methods: ['POST'])]
     public function approve(string $id, Request $request): JsonResponse
     {
@@ -89,6 +125,8 @@ class AdminWithdrawalController extends AbstractController
         $reviewNote = $this->extractReviewNote($request);
 
         // Charger l'entité cible
+        // (référencée par type + UUID, sans clé étrangère : le contenu a pu être
+        // supprimé depuis le dépôt de la demande, d'où le 404 « Cible introuvable »).
         $targetType = $withdrawal->getTargetType();
         $targetId = $withdrawal->getTargetId();
         $targetArray = null;
@@ -128,6 +166,15 @@ class AdminWithdrawalController extends AbstractController
         ]);
     }
 
+    /**
+     * Refuse une demande de retrait : elle passe REJECTED (relecteur, date, note
+     * facultative) et le contenu reste dans son état actuel.
+     *
+     * Corps JSON facultatif : `{reviewNote}`.
+     *
+     * @return JsonResponse 200 demande sérialisée ; 400 UUID mal formé ; 404 demande
+     *                      introuvable ; 409 demande déjà traitée
+     */
     #[Route('/{id}/reject', name: 'admin_withdrawals_reject', methods: ['POST'])]
     public function reject(string $id, Request $request): JsonResponse
     {
@@ -150,6 +197,10 @@ class AdminWithdrawalController extends AbstractController
         return $this->json($this->serializeWithdrawal($withdrawal));
     }
 
+    /**
+     * Lit la note de l'admin (`reviewNote`) dans le corps JSON, s'il y en a un.
+     * Corps vide, JSON invalide, champ absent, null ou blanc → null (la note est facultative).
+     */
     private function extractReviewNote(Request $request): ?string
     {
         $content = $request->getContent();
@@ -165,6 +216,9 @@ class AdminWithdrawalController extends AbstractController
         return $note === '' ? null : $note;
     }
 
+    /**
+     * Parse l'UUID et charge la demande, ou renvoie la JsonResponse d'erreur (400/404).
+     */
     private function resolveWithdrawal(string $id): WithdrawalRequest|JsonResponse
     {
         try {

@@ -15,10 +15,30 @@ use Symfony\Component\Routing\Attribute\Route;
 use Symfony\Component\Security\Http\Attribute\IsGranted;
 use Symfony\Component\Uid\Uuid;
 
+/**
+ * Gestion des comptes utilisateurs par l'administrateur (préfixe `/api/admin/users`).
+ *
+ * Accès : ROLE_ADMIN, exigé deux fois (`#[IsGranted]` ci-dessous + règle
+ * `access_control` `^/api/admin` de security.yaml).
+ *  - GET    /export        export CSV de tous les utilisateurs
+ *  - GET    /              liste paginée (recherche, filtre par rôle, abonnement actif)
+ *  - GET    /{id}          fiche d'un utilisateur
+ *  - PATCH  /{id}/suspend  suspension (connexion refusée)
+ *  - PATCH  /{id}/activate levée de la suspension
+ *  - PATCH  /{id}/role     remplacement des rôles
+ *  - PATCH  /{id}          email, prénom, nom, email vérifié
+ *  - DELETE /{id}          suppression définitive
+ *
+ * Auto-protection : un admin ne peut ni se suspendre, ni se retirer ROLE_ADMIN,
+ * ni supprimer son propre compte (cf. isSelf()), pour ne pas se priver
+ * lui-même de l'accès au back-office.
+ * Les abonnements d'un utilisateur sont gérés par AdminSubscriptionController.
+ */
 #[Route('/api/admin/users')]
 #[IsGranted('ROLE_ADMIN')]
 class AdminUserController extends AbstractController
 {
+    /** Rôles qu'un admin peut attribuer ou utiliser comme filtre de liste. */
     private const ALLOWED_ROLES = [
         'ROLE_USER',
         'ROLE_ABONNE',
@@ -36,8 +56,17 @@ class AdminUserController extends AbstractController
     }
 
     /**
-     * Liste paginée des utilisateurs avec recherche et filtre rôle.
+     * Exporte TOUS les utilisateurs au format CSV (sans pagination ni filtre),
+     * du plus récent au plus ancien.
      * L'ordre des routes importe : /export doit être déclaré AVANT /{id}.
+     * (Sinon « export » serait capturé comme valeur de `{id}` par getOne().)
+     *
+     * Le CSV est construit en mémoire (flux `php://temp`) puis renvoyé dans une
+     * `Response` classique plutôt qu'une `StreamedResponse` : le client de test
+     * (BrowserKit) ne capture pas le contenu d'une réponse streamée.
+     * Rôles séparés par `|`, booléens en 1/0, dates au format ATOM.
+     *
+     * @return Response 200 `text/csv` en pièce jointe `users-export.csv`
      */
     #[Route('/export', name: 'admin_users_export', methods: ['GET'])]
     public function export(): Response
@@ -46,6 +75,7 @@ class AdminUserController extends AbstractController
 
         $handle = fopen('php://temp', 'r+');
         // BOM UTF-8 pour Excel
+        // (sans lui, Excel lit le fichier dans l'encodage local et casse les accents).
         fwrite($handle, "\xEF\xBB\xBF");
         fputcsv($handle, [
             'id',
@@ -80,6 +110,17 @@ class AdminUserController extends AbstractController
         return $response;
     }
 
+    /**
+     * Liste paginée des utilisateurs avec recherche et filtre rôle.
+     *
+     * Paramètres de requête : `page` (défaut 1), `limit` (défaut 20, borné à
+     * 1..100), `search` (email, prénom ou nom, insensible à la casse), `role`
+     * (un des ALLOWED_ROLES ; filtre sur les rôles enregistrés en base, pas sur
+     * les rôles hérités). Tri : inscription la plus récente d'abord.
+     * Chaque ligne est enrichie de `currentSubscription` (abonnement actif ou null).
+     *
+     * @return JsonResponse 200 `{data, total, page, limit}` ; 400 si le rôle de filtre est inconnu
+     */
     #[Route('', name: 'admin_users_list', methods: ['GET'])]
     public function list(Request $request): JsonResponse
     {
@@ -122,6 +163,16 @@ class AdminUserController extends AbstractController
         ]);
     }
 
+    /**
+     * Renvoie la fiche d'un utilisateur.
+     *
+     * Nommée `getOne()` et non `getUser()` : AbstractController possède déjà
+     * `getUser(): ?UserInterface` (l'utilisateur connecté), qu'une méthode
+     * `getUser(string $id)` redéfinirait avec une signature incompatible
+     * (erreur fatale PHP) — et isSelf() en a besoin.
+     *
+     * @return JsonResponse 200 `User::toArray()` ; 400 UUID mal formé ; 404 introuvable
+     */
     #[Route('/{id}', name: 'admin_users_get', methods: ['GET'])]
     public function getOne(string $id): JsonResponse
     {
@@ -133,6 +184,16 @@ class AdminUserController extends AbstractController
         return $this->json($user->toArray());
     }
 
+    /**
+     * Suspend un compte : `POST /api/auth/login` le refuse ensuite (403).
+     *
+     * Les jetons déjà émis ne sont pas révoqués : l'access token en cours reste
+     * valable jusqu'à son expiration et `/api/auth/refresh` ne vérifie pas la
+     * suspension. Un admin ne peut pas se suspendre lui-même.
+     *
+     * @return JsonResponse 200 `User::toArray()` ; 400 si l'admin se cible lui-même ;
+     *                      400/404 (cf. resolveUser())
+     */
     #[Route('/{id}/suspend', name: 'admin_users_suspend', methods: ['PATCH'])]
     public function suspend(string $id): JsonResponse
     {
@@ -151,6 +212,11 @@ class AdminUserController extends AbstractController
         return $this->json($target->toArray());
     }
 
+    /**
+     * Lève la suspension d'un compte (l'utilisateur peut de nouveau se connecter).
+     *
+     * @return JsonResponse 200 `User::toArray()` ; 400/404 (cf. resolveUser())
+     */
     #[Route('/{id}/activate', name: 'admin_users_activate', methods: ['PATCH'])]
     public function activate(string $id): JsonResponse
     {
@@ -165,6 +231,18 @@ class AdminUserController extends AbstractController
         return $this->json($target->toArray());
     }
 
+    /**
+     * Remplace la liste des rôles d'un utilisateur (pas d'ajout incrémental).
+     *
+     * Corps JSON : `{roles: [...]}`, non vide, chaque rôle devant figurer dans
+     * ALLOWED_ROLES (doublons retirés). ROLE_USER est de toute façon ajouté par
+     * User::getRoles(). Attribuer ROLE_CREATEUR ne crée pas de studio : le
+     * parcours normal est `POST /api/studio/onboarding`.
+     *
+     * @return JsonResponse 200 `User::toArray()` ; 400 champ `roles` absent, vide ou
+     *                      contenant un rôle inconnu, ou admin qui se retire ROLE_ADMIN ;
+     *                      400/404 (cf. resolveUser())
+     */
     #[Route('/{id}/role', name: 'admin_users_role', methods: ['PATCH'])]
     public function updateRole(string $id, Request $request): JsonResponse
     {
@@ -202,7 +280,17 @@ class AdminUserController extends AbstractController
 
     /**
      * Modifie les informations générales d'un utilisateur (email, prénom, nom, isVerified).
-     * Le mot de passe et les rôles ont leur propre endpoint dédié pour des raisons de sécurité.
+     * Les rôles ont leur propre endpoint dédié (`PATCH /{id}/role`) pour des raisons
+     * de sécurité ; le mot de passe n'est modifiable par aucun endpoint admin
+     * (l'utilisateur passe par la réinitialisation par email).
+     *
+     * Mise à jour partielle : seuls les champs présents dans le corps JSON sont
+     * traités. Changer l'email coupe de fait les sessions de l'utilisateur : son
+     * JWT et ses refresh tokens référencent l'ancien email, qui ne correspond
+     * plus à aucun compte.
+     *
+     * @return JsonResponse 200 `User::toArray()` ; 400 JSON invalide, email invalide, prénom
+     *                      ou nom vide ; 409 email déjà utilisé ; 400/404 (cf. resolveUser())
      */
     #[Route('/{id}', name: 'admin_users_update', methods: ['PATCH'])]
     public function update(string $id, Request $request): JsonResponse
@@ -258,7 +346,14 @@ class AdminUserController extends AbstractController
 
     /**
      * Supprime définitivement un utilisateur. L'admin ne peut pas se supprimer lui-même.
-     * Les refresh tokens liés sont supprimés en cascade par la contrainte FK Doctrine.
+     * Ses abonnements sont supprimés en cascade (FK `ON DELETE CASCADE`). Ses refresh
+     * tokens, eux, restent en base : la table `refresh_tokens` ne stocke que l'email,
+     * sans clé étrangère vers `user` ; ils deviennent inutilisables car
+     * `/api/auth/refresh` ne retrouve plus de compte pour cet email.
+     * La base refuse la suppression du propriétaire d'un studio (FK `ON DELETE RESTRICT`)
+     * ou d'un utilisateur référencé par une demande de retrait.
+     *
+     * @return JsonResponse 204 ; 400 si l'admin se cible lui-même ; 400/404 (cf. resolveUser())
      */
     #[Route('/{id}', name: 'admin_users_delete', methods: ['DELETE'])]
     public function delete(string $id): JsonResponse
@@ -297,6 +392,10 @@ class AdminUserController extends AbstractController
         return $user;
     }
 
+    /**
+     * Vrai si l'utilisateur ciblé est l'admin connecté (comparaison par email,
+     * identifiant unique). Sert à l'auto-protection de suspend(), updateRole() et delete().
+     */
     private function isSelf(User $target): bool
     {
         $current = $this->getUser();

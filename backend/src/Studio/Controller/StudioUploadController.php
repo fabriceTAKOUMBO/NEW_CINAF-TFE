@@ -20,10 +20,24 @@ use Symfony\Component\Routing\Attribute\Route;
 use Symfony\Component\Security\Http\Attribute\IsGranted;
 use Symfony\Component\Uid\Uuid;
 
+/**
+ * Envoi des fichiers d'un studio (affiche, bande-annonce, vidéo) vers Bunny
+ * Storage (préfixe `/api/studio/upload`).
+ *
+ * Accès : ROLE_CREATEUR (attribut `#[IsGranted]` + règle `access_control`
+ * `^/api/studio`). Endpoint unique : POST '' (multipart).
+ *
+ * Le client ne choisit jamais le chemin de destination : il désigne une cible
+ * (`targetType` + `targetId`) et un usage (`purpose`), et le serveur construit
+ * le chemin via BunnyPathBuilder, sous le dossier du studio propriétaire
+ * (« 1 dossier par projet », depuis 2026-05-08). Un fichier ne peut donc
+ * jamais atterrir dans le dossier d'un autre studio.
+ */
 #[Route('/api/studio/upload')]
 #[IsGranted('ROLE_CREATEUR')]
 class StudioUploadController extends AbstractController
 {
+    // Types MIME acceptés : vidéo pour purpose=trailer|video, image pour purpose=poster.
     private const VIDEO_MIME = ['video/mp4', 'video/quicktime', 'video/webm'];
     private const IMAGE_MIME = ['image/jpeg', 'image/png', 'image/webp'];
 
@@ -60,12 +74,25 @@ class StudioUploadController extends AbstractController
      *
      * Le path Bunny est calculé via BunnyPathBuilder selon la convention
      * "1 dossier par projet" (depuis 2026-05-08).
+     *
+     * Contrôles, dans l'ordre : studio actif, paramètres de cible, fichier présent
+     * et accepté par PHP, taille (10 Mo pour une image, 3 Go pour une vidéo), type
+     * MIME puis extension, et enfin propriété de la cible.
+     *
+     * @return JsonResponse 201 `{url, path, size, mimeType}` ; 400 si un paramètre est
+     *                      invalide, si le fichier manque ou si l'upload PHP a échoué,
+     *                      ou pour un épisode avec un purpose autre que "video" ;
+     *                      403 si l'utilisateur n'a pas de studio actif ou si la cible
+     *                      appartient à un autre studio ; 404 si la cible est introuvable ;
+     *                      413 si le fichier dépasse la limite ; 415 si le type MIME ou
+     *                      l'extension n'est pas autorisé ; 502 si l'envoi vers Bunny échoue
      */
     #[Route('', name: 'studio_upload', methods: ['POST'])]
     public function upload(Request $request): JsonResponse
     {
         /** @var User $user */
         $user = $this->getUser();
+        // Premier contrôle : 403 immédiat si l'utilisateur n'a pas de studio actif.
         $studio = $this->ownershipChecker->getStudioForUser($user);
 
         // --- Validation des paramètres de cible et purpose ---
@@ -116,9 +143,12 @@ class StudioUploadController extends AbstractController
             return new JsonResponse(['message' => 'Upload invalide.'], 400);
         }
 
+        // Nature attendue du fichier : une affiche est une image, une
+        // bande-annonce ou une vidéo principale est une vidéo.
         $expectedKind = $purpose === 'poster' ? 'image' : 'video';
 
         // --- Limite de taille (avant MIME pour éviter le coût fileinfo) ---
+        // Si la taille annoncée est nulle, on mesure le fichier temporaire sur disque.
         $size = (int) $file->getSize();
         $realPath = $file->getRealPath();
         if (($size <= 0) && $realPath !== false && is_file($realPath)) {
@@ -134,6 +164,8 @@ class StudioUploadController extends AbstractController
         }
 
         // --- Whitelist MIME selon purpose ---
+        // MIME déduit du contenu (fileinfo) ; à défaut, celui annoncé par le
+        // client. Ce repli est moins fiable, d'où le second contrôle sur l'extension.
         try {
             $mime = $file->getMimeType() ?? '';
         } catch (\Throwable) {
@@ -156,6 +188,9 @@ class StudioUploadController extends AbstractController
         }
 
         // --- Résolution + ownership de l'entité cible ---
+        // L'extension du fichier client (en minuscules) devient celle du fichier
+        // sur Bunny : un nouvel upload n'écrase le précédent que si l'extension est
+        // identique (poster.png n'écrase pas poster.jpg, les deux coexistent).
         $remotePath = null;
         $ext = $clientExt;
         switch ($targetType) {
@@ -193,6 +228,8 @@ class StudioUploadController extends AbstractController
         }
 
         // --- Upload Bunny ---
+        // Aucune entité n'est modifiée ici : le frontend enregistre ensuite
+        // `path`/`url` sur la cible par un PATCH. Toute erreur Bunny devient une 502.
         try {
             $bunny = $this->zones->get(); // zone par défaut (cinaftv-movies)
             $url = $bunny->uploadFile($file, $remotePath);

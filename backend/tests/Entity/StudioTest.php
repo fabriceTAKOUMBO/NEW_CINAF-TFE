@@ -9,9 +9,18 @@ use Symfony\Component\Uid\Uuid;
 
 /**
  * Pure unit tests for the Studio entity (no DB, no kernel boot).
+ *
+ * Tests unitaires de l'entité Studio, sans base ni kernel : valeurs par
+ * défaut du constructeur, accesseurs et forme de toArray().
+ *
+ * Lancement : php bin/phpunit tests/Entity/StudioTest.php
  */
 class StudioTest extends TestCase
 {
+    /**
+     * Un studio neuf a un UUID et ses dates de création / modification, est
+     * actif, sans description ni logo, et ne possède ni film ni série.
+     */
     public function testConstructorInitializesDefaults(): void
     {
         $studio = new Studio();
@@ -26,6 +35,10 @@ class StudioTest extends TestCase
         $this->assertCount(0, $studio->getSeries());
     }
 
+    /**
+     * Les setters (chaînables) stockent chaque valeur, relue à l'identique par
+     * le getter correspondant, y compris la désactivation (isActive = false).
+     */
     public function testGettersAndSetters(): void
     {
         $owner = $this->makeOwner();
@@ -49,6 +62,10 @@ class StudioTest extends TestCase
         $this->assertFalse($studio->isActive());
     }
 
+    /**
+     * Le slug est stocké tel quel. La regex ne fait que confirmer le format
+     * kebab-case de la valeur d'exemple : l'entité ne valide pas ce format.
+     */
     public function testSlugSetterAcceptsExpectedFormat(): void
     {
         $studio = new Studio();
@@ -59,6 +76,11 @@ class StudioTest extends TestCase
         $this->assertMatchesRegularExpression('/^[a-z0-9]+(?:-[a-z0-9]+)*$/', $studio->getSlug());
     }
 
+    /**
+     * toArray() expose name, slug, description, logoUrl (null ici),
+     * bunnyFolder, isActive (true par défaut), ownerId (UUID du propriétaire)
+     * ainsi que id, createdAt et updatedAt.
+     */
     public function testToArrayShape(): void
     {
         $owner = $this->makeOwner();
@@ -84,6 +106,7 @@ class StudioTest extends TestCase
         $this->assertArrayHasKey('updatedAt', $array);
     }
 
+    /** Propriétaire factice (ROLE_CREATEUR), non persisté. */
     private function makeOwner(): User
     {
         $u = new User();

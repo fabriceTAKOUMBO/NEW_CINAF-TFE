@@ -7,6 +7,14 @@ use Doctrine\ORM\QueryBuilder;
 use Doctrine\Persistence\ManagerRegistry;
 
 /**
+ * Accès aux studios, pour deux usages :
+ *  - administration et import : findActiveOrdered() (liste admin
+ *    GET /api/admin/studios, commande app:catalogue:import-bunny) ;
+ *  - vitrine publique /api/studios (StudioPublicController) :
+ *    findPublicPaginated(), countPublic(), findPublicBySlug() et
+ *    searchPublicByName(), qui partagent le même filtre de visibilité
+ *    (buildPublicQueryBuilder() : actif + validé + au moins un contenu publié).
+ *
  * @extends ServiceEntityRepository<Studio>
  */
 class StudioRepository extends ServiceEntityRepository
@@ -16,12 +24,23 @@ class StudioRepository extends ServiceEntityRepository
         parent::__construct($registry, Studio::class);
     }
 
+    /**
+     * Studio par slug, SANS filtre de visibilité (actif, validé…), ou null.
+     * Aucun appelant dans le code actuel : les pages publiques passent par
+     * findPublicBySlug().
+     */
     public function findBySlug(string $slug): ?Studio
     {
         return $this->findOneBy(['slug' => $slug]);
     }
 
     /**
+     * Studios actifs triés par slug croissant, sans pagination.
+     *
+     * Utilisée par la liste admin GET /api/admin/studios et par
+     * app:catalogue:import-bunny, pour qui cet ordre stable détermine le
+     * studio attribué à chaque œuvre importée (index crc32(slug de l'œuvre) % 10).
+     *
      * @return Studio[]
      */
     public function findActiveOrdered(): array
@@ -34,6 +53,7 @@ class StudioRepository extends ServiceEntityRepository
             ->getResult();
     }
 
+    /** Nombre de studios actifs (aucun appelant dans le code actuel). */
     public function countActive(): int
     {
         return (int) $this->createQueryBuilder('s')
@@ -52,6 +72,8 @@ class StudioRepository extends ServiceEntityRepository
      * via deux sous-requêtes `EXISTS` (films + séries) reliées par un `OR`.
      * Sur PostgreSQL, l'index `idx_film_status_studio` / `idx_serie_status_studio`
      * suffit à rendre le plan efficient.
+     *
+     * Pages numérotées à partir de 1 (GET /api/studios).
      *
      * @return Studio[]
      */
@@ -127,6 +149,9 @@ class StudioRepository extends ServiceEntityRepository
         return $this->createQueryBuilder($alias)
             ->andWhere(sprintf('%s.isActive = :active', $alias))
             ->andWhere(sprintf('%s.isValidated = :validated', $alias))
+            // Sous-requêtes corrélées : %1$s réinjecte l'alias du studio courant
+            // dans les deux EXISTS. andWhere() met le OR entre parenthèses, il
+            // reste donc combiné en ET avec les deux conditions ci-dessus.
             ->andWhere(sprintf(
                 'EXISTS (SELECT 1 FROM App\Entity\Film f WHERE f.studio = %1$s AND f.status = :publishedStatus) '
                 . 'OR EXISTS (SELECT 1 FROM App\Entity\Serie se WHERE se.studio = %1$s AND se.status = :publishedStatus)',
@@ -134,6 +159,7 @@ class StudioRepository extends ServiceEntityRepository
             ))
             ->setParameter('active', true)
             ->setParameter('validated', true)
+            // Valeur commune à Film::STATUS_PUBLISHED et Serie::STATUS_PUBLISHED.
             ->setParameter('publishedStatus', 'PUBLISHED');
     }
 }

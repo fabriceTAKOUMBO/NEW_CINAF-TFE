@@ -1,3 +1,8 @@
+# CORS : autorise le frontend Next.js (autre origine, ex. localhost:3000) à
+# appeler l'API. CORS_ALLOW_ORIGIN est une expression régulière (origin_regex),
+# jamais `*` (cf. gotcha n° 7). Seuls les en-têtes Content-Type et
+# Authorization (JWT) sont acceptés ; max_age met la réponse preflight en cache
+# 1 heure côté navigateur.
 nelmio_cors:
     defaults:
         origin_regex: true

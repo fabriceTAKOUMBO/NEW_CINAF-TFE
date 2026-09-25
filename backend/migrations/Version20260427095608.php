@@ -10,6 +10,15 @@ use Doctrine\Migrations\AbstractMigration;
 /**
  * Création des tables `subscription_plan` et `subscription` (Sprint 3 — mock Stripe-ready).
  *
+ *  - `subscription_plan` : offres payantes (prix en centimes, devise,
+ *    périodicité `interval_unit` + `interval_count`, avantages en JSON,
+ *    `stripe_price_id` renseigné une fois l'offre créée côté Stripe).
+ *  - `subscription` : abonnement d'un utilisateur à une offre (statut, dates de
+ *    début / fin / résiliation, identifiants Stripe). Supprimé avec son
+ *    utilisateur (ON DELETE CASCADE) ; une offre encore référencée ne peut pas
+ *    être supprimée. L'index (user_id, status) sert à retrouver rapidement
+ *    l'abonnement actif d'un utilisateur.
+ *
  * Note : les statements `DROP TABLE refresh_tokens` / `DROP SEQUENCE refresh_tokens_id_seq`
  * générés automatiquement ont été retirés (gotcha #1 — mapped-superclass JWT non détecté).
  */

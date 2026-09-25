@@ -79,6 +79,12 @@ export interface ApiError {
   message: string;
   statusCode: number;
   detail?: string;
+  /**
+   * Corps JSON complet de la réponse d'erreur, pour les erreurs qui portent
+   * des données utiles à l'écran (ex. 410 d'une œuvre retirée : `{status,
+   * kind, title}`). Absent si la réponse n'est pas un objet JSON.
+   */
+  data?: Record<string, unknown>;
 }
 
 // ─── Types Abonnement & Paiement ─────────────────────────────
@@ -398,6 +404,7 @@ async function handleResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
     let errorMessage = `Erreur ${response.status}`;
     let detail: string | undefined;
+    let data: Record<string, unknown> | undefined;
 
     if (isJson) {
       try {
@@ -405,12 +412,15 @@ async function handleResponse<T>(response: Response): Promise<T> {
         // Extraction du message selon les différents formats possibles (Symfony, Hydra, Custom)
         errorMessage = errorData.message || errorData.detail || errorData["hydra:description"] || errorMessage;
         detail = errorData.detail;
+        if (errorData && typeof errorData === "object" && !Array.isArray(errorData)) {
+          data = errorData;
+        }
       } catch {
         // En cas d'échec du parsing JSON, on garde le message par défaut
       }
     }
 
-    throw { message: errorMessage, statusCode: response.status, detail } as ApiError;
+    throw { message: errorMessage, statusCode: response.status, detail, data } as ApiError;
   }
 
   // Succès sans contenu (204 No Content)

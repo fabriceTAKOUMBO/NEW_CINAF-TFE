@@ -18,6 +18,8 @@
  * 4. Détermination de l'épisode et de la saison courante : Gère les paramètres d'URL (`?s=` et `?ep=`)
  *    et propose un bouton d'enchaînement automatique vers l'épisode suivant (`nextEpisode`).
  * 5. Intégration du lecteur adaptatif `HlsPlayer` avec gestion du fallback MP4 progressif.
+ * 6. Œuvre retirée de la plateforme (API 410) → écran `ContentWithdrawnView` ;
+ *    œuvre inconnue (API 404) → écran `NotFoundView`.
  */
 
 import { useEffect, useMemo, useState } from "react";
@@ -32,6 +34,8 @@ import {
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import HlsPlayer from "./HlsPlayer";
+import NotFoundView from "./NotFoundView";
+import ContentWithdrawnView, { withdrawnInfoFrom, type WithdrawnInfo } from "./ContentWithdrawnView";
 
 /**
  * Propriétés attendues par le composant `WatchView`.
@@ -61,6 +65,10 @@ export default function WatchView({ slug, context }: WatchViewProps) {
   const [work, setWork] = useState<DiscoverWork | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  /** Œuvre inconnue (API 404) → écran « page introuvable » */
+  const [notFound, setNotFound] = useState(false);
+  /** Œuvre retirée de la plateforme (API 410) → écran « contenu retiré » */
+  const [withdrawn, setWithdrawn] = useState<WithdrawnInfo | null>(null);
   /** null = vérification en cours, true/false = résultat du backend /can-play */
   const [canPlay, setCanPlay] = useState<boolean | null>(null);
 
@@ -81,6 +89,9 @@ export default function WatchView({ slug, context }: WatchViewProps) {
     let cancelled = false;
     setLoading(true);
     setCanPlay(null);
+    setError(null);
+    setNotFound(false);
+    setWithdrawn(null);
 
     // 1. Récupère l'œuvre. 2. Vérifie l'abonnement via le backend (source de vérité,
     //    évite le user du context qui peut être figé après assignation d'abo par l'admin).
@@ -95,9 +106,18 @@ export default function WatchView({ slug, context }: WatchViewProps) {
       })
       .catch((err: unknown) => {
         if (cancelled) return;
-        const status = (err as { statusCode?: number })?.statusCode;
-        const msg = (err as { message?: string })?.message ?? "Erreur inconnue";
-        setError(status === 404 ? "Œuvre introuvable." : msg);
+        // Seule la fiche peut échouer ici (les erreurs de can-play sont
+        // absorbées ci-dessus) : 410 = œuvre retirée, 404 = œuvre inconnue.
+        const gone = withdrawnInfoFrom(err, context === "film" ? "film" : "serie");
+        if (gone) {
+          setWithdrawn(gone);
+          return;
+        }
+        if ((err as { statusCode?: number })?.statusCode === 404) {
+          setNotFound(true);
+          return;
+        }
+        setError((err as { message?: string })?.message ?? "Erreur inconnue");
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -105,7 +125,7 @@ export default function WatchView({ slug, context }: WatchViewProps) {
     return () => {
       cancelled = true;
     };
-  }, [slug, isAuthenticated]);
+  }, [slug, isAuthenticated, context]);
 
   // Calcul mémorisé de la saison active, de l'épisode sélectionné et du prochain épisode
   const { season, episode, nextEpisode } = useMemo(() => {
@@ -126,6 +146,23 @@ export default function WatchView({ slug, context }: WatchViewProps) {
       <div className="watch-page d-flex align-items-center justify-content-center" style={{ minHeight: "60vh" }}>
         <div className="spinner-border" style={{ color: "var(--cinaf-gold)" }} role="status" />
       </div>
+    );
+  }
+
+  // Œuvre retirée de la plateforme depuis que le lien a été partagé ou mis en favori.
+  if (withdrawn) {
+    return <ContentWithdrawnView {...withdrawn} />;
+  }
+
+  if (notFound) {
+    const isFilm = context === "film";
+    return (
+      <NotFoundView
+        title="Cette vidéo est introuvable"
+        message="Aucune œuvre ne correspond à cette adresse sur CINAF. Le lien est peut-être incomplet ou erroné."
+        backHref={isFilm ? "/films" : "/series"}
+        backLabel={isFilm ? "Voir tous les films" : "Voir toutes les séries"}
+      />
     );
   }
 

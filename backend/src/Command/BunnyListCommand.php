@@ -10,6 +10,27 @@ use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Style\SymfonyStyle;
 
+/**
+ * Commande de diagnostic `app:bunny:list` : affiche le contenu d'un dossier
+ * d'une Storage Zone Bunny (dossiers, puis tableau des fichiers avec type,
+ * taille, date de modification et chemin). Lecture seule.
+ *
+ * Utile pour vérifier qu'une zone est bien configurée (AccessKey, région /
+ * endpoint) ou pour inspecter l'arborescence avant un import de catalogue.
+ * Équivalent console de l'explorateur admin `/api/admin/bunny/*`.
+ *
+ * Argument et options :
+ *  - `path` (facultatif)   : dossier à lister, racine de la zone par défaut ;
+ *  - `--zone` / `-z`       : zone à interroger (sinon la zone par défaut) ;
+ *  - `--recursive` / `-r`  : descend dans tous les sous-dossiers (un appel HTTP par dossier) ;
+ *  - `--type` / `-t`       : ne garde que les fichiers de ce type (image, video, audio, document) ;
+ *  - `--list-zones`        : affiche les zones déclarées puis s'arrête.
+ *
+ * Exemples : `php bin/console app:bunny:list --list-zones`,
+ * `php bin/console app:bunny:list FILMS -z cinaftv-movies -t video`.
+ *
+ * Codes de sortie : 0 succès, 1 erreur d'accès à Bunny, 2 zone inconnue.
+ */
 #[AsCommand(
     name: 'app:bunny:list',
     description: 'Liste le contenu d\'une Storage Zone Bunny (diagnostic multi-zones).',
@@ -31,10 +52,17 @@ class BunnyListCommand extends Command
             ->addOption('list-zones', null, InputOption::VALUE_NONE, 'Affiche les zones configurées et termine');
     }
 
+    /**
+     * Exécute le listing (ou l'affichage des zones avec `--list-zones`).
+     *
+     * @return int Command::SUCCESS, Command::INVALID si la zone est inconnue,
+     *             Command::FAILURE si l'appel à Bunny échoue.
+     */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $io = new SymfonyStyle($input, $output);
 
+        // Mode « inventaire » : aucune connexion à Bunny, lecture de la configuration seule.
         if ($input->getOption('list-zones')) {
             $default = $this->zones->getDefaultZoneName();
             $io->title('Storage Zones Bunny configurées');
@@ -69,6 +97,7 @@ class BunnyListCommand extends Command
         $dirs = $result['directories'];
         $files = $result['files'];
 
+        // Le filtre par type ne s'applique qu'aux fichiers ; les dossiers restent tous affichés.
         if ($type) {
             $files = array_values(array_filter($files, fn($f) => $f['type'] === $type));
         }
@@ -106,6 +135,7 @@ class BunnyListCommand extends Command
         return Command::SUCCESS;
     }
 
+    /** Taille lisible par un humain (B, KB, MB, GB en base 1024). */
     private function fmtSize(int $bytes): string
     {
         if ($bytes < 1024) return "$bytes B";

@@ -13,11 +13,26 @@ use Stripe\Webhook;
  * Sessions et la vérification de signature webhook. Le service est instancié
  * inconditionnellement, mais lève si on l'appelle alors que STRIPE_ENABLED=false
  * (garde-fou pour ne jamais frapper Stripe en mode mock/test).
+ *
+ * Utilisé par SubscriptionController (souscription, résiliation, factures),
+ * AdminSubscriptionController (mêmes actions côté back-office) et
+ * StripeWebhookController (vérification des événements reçus).
+ * Configuration injectée par config/services.yaml depuis les variables
+ * d'environnement STRIPE_* (clés dans `.env.local`, jamais versionnées).
  */
 class StripeService
 {
+    /** Client stripe-php, créé à la première utilisation (cf. getClient()). */
     private ?StripeClient $client = null;
 
+    /**
+     * @param string $secretKey     clé secrète de l'API Stripe (STRIPE_SECRET_KEY)
+     * @param string $webhookSecret secret de signature des webhooks (STRIPE_WEBHOOK_SECRET)
+     * @param string $successUrl    URL de retour après le paiement (STRIPE_SUCCESS_URL)
+     * @param string $cancelUrl     STRIPE_CANCEL_URL : n'est lue nulle part, le mode
+     *                              Embedded Checkout n'utilisant que `return_url`
+     * @param bool   $enabled       STRIPE_ENABLED : false = mode simulé, aucun appel Stripe
+     */
     public function __construct(
         private readonly string $secretKey,
         private readonly string $webhookSecret,
@@ -27,6 +42,9 @@ class StripeService
     ) {
     }
 
+    /**
+     * Indique si l'instance fonctionne avec Stripe réel (true) ou en mode simulé (false).
+     */
     public function isEnabled(): bool
     {
         return $this->enabled;
@@ -41,8 +59,15 @@ class StripeService
      * Le `customer_email` est pré-rempli depuis l'utilisateur courant. Si
      * l'utilisateur a déjà un stripeCustomerId d'un abonnement précédent, on
      * l'utilise pour conserver l'historique côté Stripe.
+     * (Les deux paramètres sont exclusifs : `customer` OU `customer_email`.)
+     *
+     * Aucun abonnement n'est créé en base ici : c'est le webhook
+     * `checkout.session.completed` qui le fera, grâce aux métadonnées
+     * `user_id` / `plan_id` posées sur la session.
      *
      * @return array{id:string, clientSecret:string}
+     *
+     * @throws \LogicException si Stripe est désactivé, sans clé secrète, ou si le plan n'a pas de stripePriceId
      */
     public function createCheckoutSession(User $user, SubscriptionPlan $plan, ?string $existingCustomerId = null): array
     {
@@ -69,6 +94,8 @@ class StripeService
                 'user_id' => $user->getId()->toRfc4122(),
                 'plan_id' => $plan->getId()->toRfc4122(),
             ],
+            // Mêmes métadonnées recopiées sur l'objet Subscription Stripe créé par le
+            // paiement (visibles dans le dashboard Stripe ; non relues par CINAF).
             'subscription_data' => [
                 'metadata' => [
                     'user_id' => $user->getId()->toRfc4122(),
@@ -95,6 +122,9 @@ class StripeService
     /**
      * Récupère le statut d'une Checkout Session par son id — utilisé par la
      * page de retour pour distinguer paid/unpaid sans attendre le webhook.
+     *
+     * @throws \LogicException                      si Stripe est désactivé
+     * @throws \Stripe\Exception\ApiErrorException  si Stripe refuse la requête (session inconnue…)
      */
     public function retrieveCheckoutSession(string $sessionId): CheckoutSession
     {
@@ -105,6 +135,11 @@ class StripeService
     /**
      * Vérifie la signature du webhook + parse l'event. Lève
      * `\Stripe\Exception\SignatureVerificationException` si invalide.
+     *
+     * La signature (en-tête `Stripe-Signature`) est un HMAC-SHA256 de
+     * l'horodatage et du corps brut, calculé avec le secret du webhook ;
+     * stripe-php rejette aussi un horodatage écarté de plus de 300 s (anti-rejeu). Un corps qui n'est pas du JSON valide lève
+     * `\Stripe\Exception\UnexpectedValueException`.
      */
     public function constructWebhookEvent(string $payload, string $sigHeader): StripeEvent
     {
@@ -113,8 +148,12 @@ class StripeService
     }
 
     /**
-     * Récupère une subscription Stripe par son ID (utilisé par le webhook
-     * `checkout.session.completed` pour lire `current_period_end`).
+     * Récupère une subscription Stripe par son ID.
+     *
+     * Aucun appelant à ce jour : le webhook `checkout.session.completed` calcule
+     * `endsAt` localement (SubscriptionService::computeEndsAt()) sans relire
+     * l'abonnement chez Stripe ; `current_period_end` n'est exploité qu'à la
+     * réception de `customer.subscription.updated`.
      */
     public function retrieveSubscription(string $stripeSubscriptionId): \Stripe\Subscription
     {
@@ -124,8 +163,9 @@ class StripeService
 
     /**
      * Demande à Stripe d'annuler l'abonnement à la fin de la période payée
-     * (`cancel_at_period_end: true`). Stripe continue de facturer jusqu'à
-     * l'échéance puis émet `customer.subscription.deleted`. C'est la primitive
+     * (`cancel_at_period_end: true`). L'abonnement reste actif jusqu'à
+     * l'échéance de la période déjà payée, sans nouveau prélèvement, puis Stripe
+     * émet `customer.subscription.deleted`. C'est la primitive
      * de la « résiliation différée » côté CINAF v2.
      */
     public function cancelAtPeriodEnd(string $stripeSubscriptionId): \Stripe\Subscription
@@ -155,6 +195,9 @@ class StripeService
      * Liste les invoices Stripe d'un customer et les transforme en DTOs
      * sérialisables (montants en cents, dates ATOM, status brut Stripe).
      * Utilisé par les endpoints d'historique de paiements.
+     *
+     * Seule la première page de résultats est lue (au plus `$limit` factures,
+     * les plus récentes d'abord selon l'ordre de l'API Stripe).
      *
      * @return list<array{
      *   id:string,
@@ -191,6 +234,7 @@ class StripeService
      */
     private function mapInvoiceToDto(\Stripe\Invoice $invoice): array
     {
+        // paid_at (timestamp Unix) reste null tant que la facture n'est pas payée.
         $paidAtTs = $invoice->status_transitions->paid_at ?? null;
         $paidAt = $paidAtTs !== null
             ? (new \DateTimeImmutable('@' . $paidAtTs))->format(\DateTimeInterface::ATOM)
@@ -235,6 +279,10 @@ class StripeService
         return null;
     }
 
+    /**
+     * Instancie le client stripe-php à la première utilisation seulement :
+     * en mode simulé, aucun client n'est jamais créé.
+     */
     private function getClient(): StripeClient
     {
         if ($this->client === null) {
@@ -243,6 +291,11 @@ class StripeService
         return $this->client;
     }
 
+    /**
+     * Garde-fou appelé en tête de chaque méthode qui contacte Stripe.
+     *
+     * @throws \LogicException si STRIPE_ENABLED=false ou si la clé secrète est vide
+     */
     private function assertEnabled(): void
     {
         if (!$this->enabled) {

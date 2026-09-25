@@ -17,6 +17,30 @@ use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Routing\Attribute\Route;
 use Symfony\Component\Security\Http\Attribute\IsGranted;
 
+/**
+ * Catalogue public des films (lecture en base de données) et quelques
+ * opérations ponctuelles, sous le préfixe /api/films :
+ *  - GET    /api/films               liste paginée (public) ;
+ *  - GET    /api/films/search        recherche texte + filtres (public) ;
+ *  - GET    /api/films/featured      films « à la une » (public) ;
+ *  - GET    /api/films/trending      films les plus vus (public) ;
+ *  - GET    /api/films/new           derniers films ajoutés (public) ;
+ *  - GET    /api/films/{id}          fiche d'un film (public) ;
+ *  - PATCH  /api/films/{id}          modification (ROLE_ADMIN) ;
+ *  - DELETE /api/films/{id}          suppression (ROLE_ADMIN) ;
+ *  - POST   /api/films/{id}/view     +1 vue (utilisateur connecté) ;
+ *  - GET    /api/films/{id}/stream   infos de lecture Bunny (utilisateur connecté).
+ *
+ * Visibilité : les lectures publiques ne renvoient que des films PUBLISHED ;
+ * un film inexistant ou non publié donne 404 (jamais 403), pour ne pas
+ * révéler l'existence d'un brouillon. Aucune règle access_control ne couvre
+ * /api/films : l'accès repose sur les `#[IsGranted]` des méthodes. Les routes
+ * fixes (/search, /featured, /trending, /new) sont déclarées avant /{id},
+ * sinon elles seraient capturées comme un identifiant.
+ *
+ * Limite : `{id}` n'est pas validé ; une valeur qui n'est pas un UUID fait
+ * échouer find() (exception de conversion Doctrine, réponse 500) au lieu d'un 404.
+ */
 #[Route('/api/films')]
 class FilmController extends AbstractController
 {
@@ -33,6 +57,13 @@ class FilmController extends AbstractController
         private readonly string $bunnyStreamLibraryId,
     ) {}
 
+    /**
+     * Liste paginée des films PUBLISHED, plus récents d'abord.
+     *
+     * Paramètres : `page` (défaut 1, ramené à ≥ 1), `limit` (défaut 30, borné à 1..100).
+     *
+     * @return JsonResponse 200 `{data: Film::toArray(true)[], total, page, limit}`
+     */
     #[Route('', name: 'film_list', methods: ['GET'])]
     public function list(Request $req): JsonResponse
     {
@@ -42,6 +73,17 @@ class FilmController extends AbstractController
         return $this->paginated($result);
     }
 
+    /**
+     * Recherche parmi les films PUBLISHED (FilmRepository::search()).
+     *
+     * Paramètres : `q` (texte cherché dans le titre et le synopsis, insensible
+     * à la casse), filtres optionnels `genre` (nom ou slug), `year`, `country`
+     * (nom ou code ISO), pagination `page` / `limit` comme list(). Le
+     * paramètre `lang` est transmis mais ignoré par le repository (aucune
+     * relation entre Film et Language).
+     *
+     * @return JsonResponse 200 `{data: Film::toArray(true)[], total, page, limit}`
+     */
     #[Route('/search', name: 'film_search', methods: ['GET'])]
     public function search(Request $req): JsonResponse
     {
@@ -58,10 +100,20 @@ class FilmController extends AbstractController
         return $this->paginated($result);
     }
 
+    /**
+     * Films « à la une » : mises en avant en cours
+     * (FeaturedContentRepository::findActive()), dans l'ordre de `position`.
+     * Les séries mises en avant et les films non PUBLISHED sont écartés.
+     *
+     * @return JsonResponse 200 tableau de Film::toArray(true) (les films
+     *                      eux-mêmes, pas les objets FeaturedContent)
+     */
     #[Route('/featured', name: 'film_featured', methods: ['GET'])]
     public function featuredList(): JsonResponse
     {
         $items = $this->featured->findActive();
+        // array_map renvoie null pour chaque entrée écartée, array_filter
+        // retire ces null et array_values réindexe (tableau JSON, pas objet).
         $data = array_values(array_filter(array_map(
             function (FeaturedContent $fc) {
                 $film = $fc->getFilm();
@@ -75,6 +127,13 @@ class FilmController extends AbstractController
         return new JsonResponse($data);
     }
 
+    /**
+     * Films PUBLISHED les plus vus (compteur `views` décroissant).
+     *
+     * Paramètre : `limit` (défaut 10, borné à 1..50).
+     *
+     * @return JsonResponse 200 tableau de Film::toArray(true)
+     */
     #[Route('/trending', name: 'film_trending', methods: ['GET'])]
     public function trending(Request $req): JsonResponse
     {
@@ -85,6 +144,13 @@ class FilmController extends AbstractController
         return new JsonResponse(array_map(fn(Film $f) => $f->toArray(true), $items));
     }
 
+    /**
+     * Derniers films PUBLISHED ajoutés (date de création en base décroissante).
+     *
+     * Paramètre : `limit` (défaut 10, borné à 1..50).
+     *
+     * @return JsonResponse 200 tableau de Film::toArray(true)
+     */
     #[Route('/new', name: 'film_new', methods: ['GET'])]
     public function newReleases(Request $req): JsonResponse
     {
@@ -93,10 +159,18 @@ class FilmController extends AbstractController
         return new JsonResponse(array_map(fn(Film $f) => $f->toArray(true), $items));
     }
 
+    /**
+     * Fiche publique d'un film.
+     *
+     * @return JsonResponse 200 Film::toArray(true) ; 404 `{error}` si le film
+     *                      n'existe pas ou n'est pas PUBLISHED
+     */
     #[Route('/{id}', name: 'film_get', methods: ['GET'])]
     public function get(string $id): JsonResponse
     {
         $film = $this->films->find($id);
+        // Brouillon, en attente d'approbation ou retiré : même 404 qu'un film
+        // inexistant, pour ne pas révéler son existence.
         if (!$film || $film->getStatus() !== Film::STATUS_PUBLISHED) {
             return new JsonResponse(['error' => 'Film not found'], 404);
         }
@@ -109,6 +183,20 @@ class FilmController extends AbstractController
     // POST /api/films a été retiré le 2026-06-03 (vestige Sprint 2 non utilisé,
     // qui renvoyait 500 faute d'assigner un studio).
 
+    /**
+     * Modification d'un film par un administrateur, quel que soit son statut
+     * (le statut lui-même n'est pas modifiable ici).
+     *
+     * Corps JSON, tous champs facultatifs : `title`, `synopsis`, `year`,
+     * `duration` (ignorés s'ils sont absents ou null) ; `poster`,
+     * `trailerVideoId`, `bunnyVideoId` (appliqués dès que la clé est
+     * présente, même à null, ce qui permet de les effacer) ; relations
+     * `genres`, `countries`, `directors`, `cast` (voir attachRelations()).
+     * Aucune validation des valeurs au-delà du transtypage en entier.
+     *
+     * @return JsonResponse 200 Film::toArray(true) du film modifié ; 404 `{error}`
+     *                      si introuvable ; 401 sans jeton, 403 si non admin
+     */
     #[Route('/{id}', name: 'film_patch', methods: ['PATCH'])]
     #[IsGranted('ROLE_ADMIN')]
     public function patch(string $id, Request $req): JsonResponse
@@ -118,6 +206,8 @@ class FilmController extends AbstractController
             return new JsonResponse(['error' => 'Film not found'], 404);
         }
         $data = json_decode($req->getContent(), true) ?? [];
+        // isset() ignore les valeurs null ; array_key_exists() (plus bas)
+        // les accepte, pour pouvoir vider un champ média.
         if (isset($data['title'])) { $film->setTitle($data['title']); }
         if (isset($data['synopsis'])) { $film->setSynopsis($data['synopsis']); }
         if (isset($data['year'])) { $film->setYear((int) $data['year']); }
@@ -131,6 +221,13 @@ class FilmController extends AbstractController
         return new JsonResponse($film->toArray(true));
     }
 
+    /**
+     * Suppression définitive d'un film par un administrateur, quel que soit
+     * son statut.
+     *
+     * @return Response 204 sans corps ; 404 `{error}` si introuvable ;
+     *                  401 sans jeton, 403 si non admin
+     */
     #[Route('/{id}', name: 'film_delete', methods: ['DELETE'])]
     #[IsGranted('ROLE_ADMIN')]
     public function delete(string $id): Response
@@ -144,6 +241,14 @@ class FilmController extends AbstractController
         return new Response('', 204);
     }
 
+    /**
+     * Ajoute une vue au compteur du film (qui alimente /api/films/trending).
+     *
+     * Chaque appel compte une vue, sans dédoublonnage. Le statut n'est pas
+     * vérifié : contrairement à get(), un film non publié est aussi comptabilisé.
+     *
+     * @return Response 204 sans corps ; 404 `{error}` si le film n'existe pas ; 401 sans jeton
+     */
     #[Route('/{id}/view', name: 'film_view', methods: ['POST'])]
     #[IsGranted('IS_AUTHENTICATED_FULLY')]
     public function incrementView(string $id): Response
@@ -157,6 +262,18 @@ class FilmController extends AbstractController
         return new Response('', 204);
     }
 
+    /**
+     * Informations de lecture d'un film pour le lecteur vidéo (nom de méthode
+     * streamInfo() : `stream()` entrerait en collision avec AbstractController).
+     *
+     * Renvoie le chemin Bunny de la vidéo et l'identifiant de la Bunny Stream
+     * Library. Seule une authentification est exigée : aucun contrôle
+     * d'abonnement payant ici et, contrairement à EpisodeController::streamInfo(),
+     * aucun contrôle du statut PUBLISHED.
+     *
+     * @return JsonResponse 200 `{bunnyVideoId, libraryId}` ; 404 `{error}` si le
+     *                      film n'existe pas ; 401 sans jeton
+     */
     #[Route('/{id}/stream', name: 'film_stream', methods: ['GET'])]
     #[IsGranted('IS_AUTHENTICATED_FULLY')]
     public function streamInfo(string $id): JsonResponse
@@ -171,6 +288,23 @@ class FilmController extends AbstractController
         ]);
     }
 
+    /**
+     * Remplace les relations du film à partir du corps d'un PATCH.
+     *
+     * Pour chaque clé fournie sous forme de tableau NON vide (`genres`,
+     * `countries`, `directors`, `cast`), la liste existante est vidée puis
+     * reconstruite ; une clé absente ou un tableau vide laisse la relation
+     * inchangée (impossible donc de tout retirer). Les références introuvables
+     * sont ignorées sans erreur. Formes prévues : genre par UUID, slug ou nom ;
+     * pays par UUID ou code ISO ; personne par UUID.
+     *
+     * Limite (lecture du code) : find() convertit la valeur en UUID ; une
+     * valeur qui n'est pas un UUID valide (slug, nom, code ISO) y lève une
+     * exception de conversion Doctrine (réponse 500) avant d'atteindre les
+     * replis findBySlug() / findByName() / findByIsoCode().
+     *
+     * @param array<string, mixed> $data corps JSON décodé de la requête
+     */
     private function attachRelations(Film $film, array $data): void
     {
         if (!empty($data['genres']) && is_array($data['genres'])) {
@@ -203,6 +337,13 @@ class FilmController extends AbstractController
         }
     }
 
+    /**
+     * Met en forme un résultat paginé de FilmRepository (films en vue étendue).
+     *
+     * @param array{data: Film[], total: int, page: int, limit: int} $result
+     *
+     * @return JsonResponse 200 `{data: Film::toArray(true)[], total, page, limit}`
+     */
     private function paginated(array $result): JsonResponse
     {
         return new JsonResponse([

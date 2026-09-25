@@ -21,6 +21,36 @@ use Symfony\Component\Security\Http\Attribute\IsGranted;
 use Symfony\Component\String\Slugger\SluggerInterface;
 use Symfony\Component\Uid\Uuid;
 
+/**
+ * Gestion des séries d'un studio, de leurs saisons et de leurs épisodes depuis
+ * l'espace studio (préfixe `/api/studio/series`).
+ *
+ * Accès : ROLE_CREATEUR (attribut `#[IsGranted]` + règle `access_control`
+ * `^/api/studio`). Chaque action résout d'abord la série et vérifie qu'elle
+ * appartient au studio actif de l'utilisateur (StudioOwnershipChecker, 403
+ * sinon) ; saisons et épisodes héritent de ce contrôle par leur série. Les
+ * identifiants de route doivent avoir la forme d'un UUID (36 caractères
+ * hexadécimaux ou tirets), sinon aucune route ne correspond (404).
+ *
+ * Endpoints :
+ *  - GET    ''                                  liste paginée des séries du studio
+ *  - GET    /{id}                               détail, saisons et épisodes inclus
+ *  - POST   ''                                  création d'une série, toujours en DRAFT
+ *  - PATCH  /{id}                               modification partielle (refusée en PENDING_APPROVAL)
+ *  - DELETE /{id}                               suppression, possible uniquement en DRAFT
+ *  - POST   /{id}/publish                       publication (PUBLISHED, ou PENDING_APPROVAL)
+ *  - POST   /{id}/withdraw                      demande de retrait adressée à l'admin
+ *  - POST   /{serieId}/seasons                  création d'une saison
+ *  - PATCH  /{serieId}/seasons/{seasonId}       modification d'une saison
+ *  - DELETE /{serieId}/seasons/{seasonId}       suppression d'une saison et de ses épisodes
+ *  - POST   /{serieId}/seasons/{seasonId}/episodes               création d'un épisode
+ *  - PATCH  /{serieId}/seasons/{seasonId}/episodes/{episodeId}   modification d'un épisode
+ *  - DELETE /{serieId}/seasons/{seasonId}/episodes/{episodeId}   suppression d'un épisode
+ *
+ * Le gel en PENDING_APPROVAL et la règle « suppression en DRAFT uniquement »
+ * ne portent que sur la série elle-même : les routes des saisons et des
+ * épisodes ne consultent pas le statut de la série.
+ */
 #[Route('/api/studio/series')]
 #[IsGranted('ROLE_CREATEUR')]
 class StudioSerieController extends AbstractController
@@ -40,6 +70,16 @@ class StudioSerieController extends AbstractController
     // Serie CRUD
     // -----------------------------------------------------------------
 
+    /**
+     * Liste paginée des séries du studio de l'utilisateur, de la plus récente à la plus ancienne.
+     *
+     * Paramètres de requête : `page` (défaut 1), `limit` (défaut 30, borné entre 1 et 100)
+     * et `status` optionnel (DRAFT, PUBLISHED, WITHDRAWN ou PENDING_APPROVAL).
+     *
+     * @return JsonResponse 200 `{data, total, page, limit}`, chaque série au format
+     *                      `Serie::toArray(true)` (saisons incluses, sans leurs épisodes) ;
+     *                      400 si `status` est inconnu ; 403 si pas de studio actif
+     */
     #[Route('', name: 'studio_series_list', methods: ['GET'])]
     public function list(Request $request): JsonResponse
     {
@@ -71,6 +111,13 @@ class StudioSerieController extends AbstractController
         ]);
     }
 
+    /**
+     * Détail d'une série du studio, avec ses saisons et leurs épisodes.
+     *
+     * @return JsonResponse 200 série (`Serie::toArray(true, true)`) ; 400 si `id` n'est pas
+     *                      un UUID valide ; 403 si la série appartient à un autre studio ;
+     *                      404 si elle n'existe pas
+     */
     #[Route('/{id}', name: 'studio_series_get', methods: ['GET'], requirements: ['id' => '[0-9a-fA-F-]{36}'])]
     public function get(string $id): JsonResponse
     {
@@ -88,6 +135,16 @@ class StudioSerieController extends AbstractController
         return new JsonResponse($serie->toArray(true, true));
     }
 
+    /**
+     * Crée une série en DRAFT, rattachée au studio de l'utilisateur.
+     *
+     * Corps JSON : `title`, `synopsis` et `year` obligatoires ; `slug` facultatif
+     * (sinon dérivé du titre avec un suffixe aléatoire de 6 caractères hexadécimaux,
+     * comme pour les films). Saisons et épisodes s'ajoutent ensuite par leurs routes dédiées.
+     *
+     * @return JsonResponse 201 série créée (`Serie::toArray(true)`) ; 400 si le JSON est
+     *                      invalide ou si un champ obligatoire manque ; 403 si pas de studio actif
+     */
     #[Route('', name: 'studio_series_create', methods: ['POST'])]
     public function create(Request $request): JsonResponse
     {
@@ -125,6 +182,17 @@ class StudioSerieController extends AbstractController
         return new JsonResponse($serie->toArray(true), 201);
     }
 
+    /**
+     * Modifie partiellement une série du studio : seuls les champs présents dans
+     * le corps JSON sont appliqués.
+     *
+     * Champs acceptés : `title`, `synopsis`, `year` (une valeur null y est ignorée) ;
+     * `poster` et `trailerVideoId` (null efface la valeur).
+     *
+     * @return JsonResponse 200 série modifiée ; 400 si `id` n'est pas un UUID valide ou si le
+     *                      JSON est invalide ; 403 si la série appartient à un autre studio ;
+     *                      404 si elle n'existe pas ; 409 si elle est en PENDING_APPROVAL
+     */
     #[Route('/{id}', name: 'studio_series_patch', methods: ['PATCH'], requirements: ['id' => '[0-9a-fA-F-]{36}'])]
     public function patch(string $id, Request $request): JsonResponse
     {
@@ -160,6 +228,18 @@ class StudioSerieController extends AbstractController
         return new JsonResponse($serie->toArray(true));
     }
 
+    /**
+     * Supprime définitivement une série encore en DRAFT, avec ses saisons et
+     * épisodes (cascade `remove` déclarée sur Serie::$seasons et Season::$episodes).
+     * Les fichiers déjà envoyés sur Bunny ne sont pas supprimés.
+     *
+     * Dans tout autre statut, la réponse est 409 : le retrait d'une série publiée
+     * passe par une demande de retrait validée par un administrateur.
+     *
+     * @return Response 204 sans contenu ; 400 si `id` n'est pas un UUID valide ; 403 si la
+     *                  série appartient à un autre studio ; 404 si elle n'existe pas ;
+     *                  409 si elle n'est pas en DRAFT
+     */
     #[Route('/{id}', name: 'studio_series_delete', methods: ['DELETE'], requirements: ['id' => '[0-9a-fA-F-]{36}'])]
     public function delete(string $id): Response
     {
@@ -183,6 +263,16 @@ class StudioSerieController extends AbstractController
         return new Response('', 204);
     }
 
+    /**
+     * Publie une série en DRAFT (transition déléguée à ContentLifecycleService::publishSerie()).
+     *
+     * La série passe en PUBLISHED si le studio est validé, sinon en PENDING_APPROVAL
+     * dans l'attente d'une approbation administrateur.
+     *
+     * @return JsonResponse 200 série avec son nouveau statut ; 400 si elle n'est pas en DRAFT
+     *                      ou si `id` n'est pas un UUID valide ; 403 si elle appartient à
+     *                      un autre studio ; 404 si elle n'existe pas
+     */
     #[Route('/{id}/publish', name: 'studio_series_publish', methods: ['POST'], requirements: ['id' => '[0-9a-fA-F-]{36}'])]
     public function publish(string $id): JsonResponse
     {
@@ -199,6 +289,19 @@ class StudioSerieController extends AbstractController
         return new JsonResponse($serie->toArray(true));
     }
 
+    /**
+     * Demande le retrait d'une série : crée une WithdrawalRequest en PENDING que
+     * l'admin approuvera (série → WITHDRAWN) ou rejettera.
+     *
+     * Corps JSON : `reason` obligatoire (non vide). Comme pour les films, le statut
+     * de la série n'est pas contrôlé ici ; seule l'unicité d'une demande PENDING
+     * par contenu est imposée.
+     *
+     * @return JsonResponse 201 demande créée (`WithdrawalRequest::toArray()`) ; 400 si `reason`
+     *                      manque ou si `id` n'est pas un UUID valide ; 403 si la série
+     *                      appartient à un autre studio ; 404 si elle n'existe pas ;
+     *                      409 si une demande de retrait est déjà en attente
+     */
     #[Route('/{id}/withdraw', name: 'studio_series_withdraw', methods: ['POST'], requirements: ['id' => '[0-9a-fA-F-]{36}'])]
     public function withdraw(string $id, Request $request): JsonResponse
     {
@@ -231,6 +334,19 @@ class StudioSerieController extends AbstractController
     // Seasons
     // -----------------------------------------------------------------
 
+    /**
+     * Ajoute une saison à une série du studio.
+     *
+     * Corps JSON : `number` obligatoire ; `title` et `synopsis` facultatifs.
+     * NB : contrairement aux épisodes, le numéro n'est pas pré-vérifié ; un doublon
+     * (même série, même numéro) viole l'index unique `uniq_season_serie_number`
+     * au flush et remonte en erreur 500.
+     *
+     * @return JsonResponse 201 saison créée (`Season::toArray(false)` : id, number, title,
+     *                      synopsis) ; 400 si `number` manque ou si `serieId` n'est pas un
+     *                      UUID valide ; 403 si la série appartient à un autre studio ;
+     *                      404 si elle n'existe pas
+     */
     #[Route('/{serieId}/seasons', name: 'studio_seasons_create', methods: ['POST'], requirements: ['serieId' => '[0-9a-fA-F-]{36}'])]
     public function createSeason(string $serieId, Request $request): JsonResponse
     {
@@ -259,6 +375,18 @@ class StudioSerieController extends AbstractController
         return new JsonResponse($season->toArray(false), 201);
     }
 
+    /**
+     * Modifie partiellement une saison d'une série du studio.
+     *
+     * Champs acceptés : `number` (null ignoré ; pas de pré-contrôle d'unicité, un
+     * numéro déjà pris fait échouer le flush) ; `title` et `synopsis` (null efface
+     * la valeur).
+     *
+     * @return JsonResponse 200 saison modifiée (`Season::toArray(false)`) ; 400 si un
+     *                      identifiant n'est pas un UUID valide ou si le JSON est invalide ;
+     *                      403 si la série appartient à un autre studio ; 404 si la série
+     *                      ou la saison est introuvable (ou si la saison est d'une autre série)
+     */
     #[Route('/{serieId}/seasons/{seasonId}', name: 'studio_seasons_patch', methods: ['PATCH'], requirements: ['serieId' => '[0-9a-fA-F-]{36}', 'seasonId' => '[0-9a-fA-F-]{36}'])]
     public function patchSeason(string $serieId, string $seasonId, Request $request): JsonResponse
     {
@@ -285,6 +413,13 @@ class StudioSerieController extends AbstractController
         return new JsonResponse($season->toArray(false));
     }
 
+    /**
+     * Supprime une saison et, par cascade Doctrine, tous ses épisodes.
+     *
+     * @return Response 204 sans contenu ; 400 si un identifiant n'est pas un UUID valide ;
+     *                  403 si la série appartient à un autre studio ; 404 si la série ou
+     *                  la saison est introuvable
+     */
     #[Route('/{serieId}/seasons/{seasonId}', name: 'studio_seasons_delete', methods: ['DELETE'], requirements: ['serieId' => '[0-9a-fA-F-]{36}', 'seasonId' => '[0-9a-fA-F-]{36}'])]
     public function deleteSeason(string $serieId, string $seasonId): Response
     {
@@ -307,6 +442,21 @@ class StudioSerieController extends AbstractController
     // Episodes
     // -----------------------------------------------------------------
 
+    /**
+     * Ajoute un épisode à une saison d'une série du studio.
+     *
+     * Corps JSON : `number` (entier >= 1, unique dans la saison) et `title` obligatoires ;
+     * `synopsis`, `duration` (en minutes) et `bunnyVideoId` facultatifs. La vidéo peut
+     * aussi être envoyée après coup via `POST /api/studio/upload` (targetType=episode),
+     * qui range le fichier sous `studios/{studio}/{serie}/saison-{N}/episode-{NN}/`.
+     *
+     * @return JsonResponse 201 épisode créé (`Episode::toArray()`) ; 400 si le JSON est
+     *                      invalide, si un champ obligatoire manque, si `number` < 1 ou si
+     *                      un identifiant n'est pas un UUID valide ; 403 si la série appartient
+     *                      à un autre studio ou si `bunnyVideoId` sort de `studios/{slug-du-studio}/` ;
+     *                      404 si la série ou la saison est introuvable ; 409 si le numéro
+     *                      est déjà pris dans la saison
+     */
     #[Route('/{serieId}/seasons/{seasonId}/episodes', name: 'studio_episodes_create', methods: ['POST'], requirements: ['serieId' => '[0-9a-fA-F-]{36}', 'seasonId' => '[0-9a-fA-F-]{36}'])]
     public function createEpisode(string $serieId, string $seasonId, Request $request): JsonResponse
     {
@@ -365,6 +515,20 @@ class StudioSerieController extends AbstractController
         return new JsonResponse($episode->toArray(), 201);
     }
 
+    /**
+     * Modifie partiellement un épisode.
+     *
+     * Champs acceptés : `number` (>= 1, unique dans la saison), `title` et `duration`
+     * (null ignoré) ; `synopsis` (null efface la valeur) ; `bunnyVideoId`, soumis aux
+     * mêmes règles de propriété du chemin Bunny que pour les films (Phase H).
+     *
+     * @return JsonResponse 200 épisode modifié (`Episode::toArray()`) ; 400 si le JSON est
+     *                      invalide, si `number` < 1 ou si un identifiant n'est pas un UUID
+     *                      valide ; 403 si la série appartient à un autre studio, si le chemin
+     *                      Bunny actuel provient de l'import ou si le nouveau sort de
+     *                      `studios/{slug-du-studio}/` ; 404 si la série, la saison ou
+     *                      l'épisode est introuvable ; 409 si le nouveau numéro est déjà pris
+     */
     #[Route('/{serieId}/seasons/{seasonId}/episodes/{episodeId}', name: 'studio_episodes_patch', methods: ['PATCH'], requirements: ['serieId' => '[0-9a-fA-F-]{36}', 'seasonId' => '[0-9a-fA-F-]{36}', 'episodeId' => '[0-9a-fA-F-]{36}'])]
     public function patchEpisode(string $serieId, string $seasonId, string $episodeId, Request $request): JsonResponse
     {
@@ -429,6 +593,13 @@ class StudioSerieController extends AbstractController
         return new JsonResponse($episode->toArray());
     }
 
+    /**
+     * Supprime un épisode (le fichier vidéo éventuel n'est pas supprimé de Bunny).
+     *
+     * @return Response 204 sans contenu ; 400 si un identifiant n'est pas un UUID valide ;
+     *                  403 si la série appartient à un autre studio ; 404 si la série,
+     *                  la saison ou l'épisode est introuvable
+     */
     #[Route('/{serieId}/seasons/{seasonId}/episodes/{episodeId}', name: 'studio_episodes_delete', methods: ['DELETE'], requirements: ['serieId' => '[0-9a-fA-F-]{36}', 'seasonId' => '[0-9a-fA-F-]{36}', 'episodeId' => '[0-9a-fA-F-]{36}'])]
     public function deleteEpisode(string $serieId, string $seasonId, string $episodeId): Response
     {
@@ -450,6 +621,15 @@ class StudioSerieController extends AbstractController
     // Helpers
     // -----------------------------------------------------------------
 
+    /**
+     * Résout une série par UUID et vérifie qu'elle appartient au studio actif de l'utilisateur.
+     *
+     * @return Serie|JsonResponse la série, ou une réponse d'erreur 400 (UUID invalide)
+     *                            ou 404 (série introuvable)
+     *
+     * @throws \Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException (403) si
+     *         la série n'appartient pas au studio actif de l'utilisateur
+     */
     private function resolveSerieForUser(string $id, User $user): Serie|JsonResponse
     {
         try {
@@ -469,6 +649,12 @@ class StudioSerieController extends AbstractController
     }
 
     /**
+     * Résout une saison après avoir contrôlé sa série (resolveSerieForUser()).
+     *
+     * Une saison qui existe mais appartient à une autre série est traitée comme
+     * introuvable (404) : on ne peut pas atteindre la saison d'un autre studio
+     * en la combinant avec l'identifiant d'une de ses propres séries.
+     *
      * @return array{0: Serie, 1: Season}|JsonResponse
      */
     private function resolveSeasonForUser(string $serieId, string $seasonId, User $user): array|JsonResponse
@@ -492,6 +678,14 @@ class StudioSerieController extends AbstractController
         return [$serie, $season];
     }
 
+    /**
+     * Résout un épisode en remontant la chaîne série → saison → épisode, chaque
+     * maillon devant appartenir au précédent (sinon 404).
+     *
+     * @return Episode|JsonResponse l'épisode, ou la réponse d'erreur 400/404 de l'un
+     *                              des niveaux (le 403 de propriété est levé par
+     *                              resolveSerieForUser())
+     */
     private function resolveEpisodeForUser(string $serieId, string $seasonId, string $episodeId, User $user): Episode|JsonResponse
     {
         $resolved = $this->resolveSeasonForUser($serieId, $seasonId, $user);

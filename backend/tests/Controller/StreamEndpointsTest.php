@@ -14,6 +14,12 @@ use Symfony\Component\HttpFoundation\Response;
  * Both endpoints must return {bunnyVideoId, libraryId} to the frontend player.
  * In the test environment, BUNNY_STREAM_LIBRARY_ID is set in .env.test.
  *
+ * En français : pour chaque endpoint de lecture (film, épisode), vérifie le
+ * 401 sans jeton, le 200 avec `{bunnyVideoId, libraryId}` non vides pour un
+ * contenu publié, et le 404 pour un UUID inconnu. Aucun contenu non publié
+ * n'est testé ; côté film, l'endpoint ne contrôle d'ailleurs pas le statut
+ * (voir FilmController::streamInfo()).
+ *
  * Run: php bin/phpunit tests/Controller/StreamEndpointsTest.php
  */
 class StreamEndpointsTest extends ApiTestCase

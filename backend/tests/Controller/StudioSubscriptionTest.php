@@ -28,11 +28,17 @@ use Symfony\Component\HttpFoundation\Response;
  * autre récupération de service via `static::getContainer()`, sous peine de
  * LogicException « Booting the kernel before createClient ... » (le kernel
  * ne peut être démarré qu'une fois par test).
+ *
+ * Rappel : ce suivi gratuit (`StudioSubscription`) est distinct de
+ * l'abonnement payant (`Subscription`) qui donne accès aux vidéos.
+ *
+ * Lancement : `php bin/phpunit tests/Controller/StudioSubscriptionTest.php`.
  */
 final class StudioSubscriptionTest extends ApiTestCase
 {
     use StudioTestTrait;
 
+    /** Premier abonnement d'un utilisateur connecté à un studio public : 201, compteur à 1, ligne en base. */
     public function testSubscribeReturns201ForAuthenticatedUser(): void
     {
         $client = static::createClient();
@@ -58,6 +64,7 @@ final class StudioSubscriptionTest extends ApiTestCase
         $this->assertTrue($repo->isSubscribed($user, $studio));
     }
 
+    /** Deux POST successifs : 201 puis 200, et toujours une seule ligne en base. */
     public function testDoubleSubscribeIsIdempotent(): void
     {
         $client = static::createClient();
@@ -85,6 +92,7 @@ final class StudioSubscriptionTest extends ApiTestCase
         $this->assertSame(1, $repo->countByStudio($studio));
     }
 
+    /** Désabonnement d'un abonné : 204 et plus aucune ligne pour ce studio. */
     public function testUnsubscribeReturns204AndRemovesFromDb(): void
     {
         $client = static::createClient();
@@ -109,6 +117,7 @@ final class StudioSubscriptionTest extends ApiTestCase
         $this->assertSame(0, $repo->countByStudio($studio));
     }
 
+    /** DELETE par un utilisateur jamais abonné : 204 quand même (idempotence). */
     public function testUnsubscribeIdempotentReturns204IfNotSubscribed(): void
     {
         $client = static::createClient();
@@ -126,6 +135,7 @@ final class StudioSubscriptionTest extends ApiTestCase
         $this->assertSame(Response::HTTP_NO_CONTENT, $resp->getStatusCode());
     }
 
+    /** Statut d'abonnement d'un non-abonné : `isSubscribed` = false. */
     public function testGetSubscriptionReturnsFalseForNonSubscriber(): void
     {
         $client = static::createClient();
@@ -143,6 +153,7 @@ final class StudioSubscriptionTest extends ApiTestCase
         $this->assertFalse($body['isSubscribed']);
     }
 
+    /** Statut d'abonnement juste après un POST subscribe : `isSubscribed` = true. */
     public function testGetSubscriptionReturnsTrueAfterSubscribe(): void
     {
         $client = static::createClient();
@@ -162,6 +173,7 @@ final class StudioSubscriptionTest extends ApiTestCase
         $this->assertTrue($body['isSubscribed']);
     }
 
+    /** Abonnement sans jeton JWT : 401. */
     public function testSubscribeReturns401ForAnonymous(): void
     {
         $client = static::createClient();
@@ -176,6 +188,7 @@ final class StudioSubscriptionTest extends ApiTestCase
         $this->assertSame(Response::HTTP_UNAUTHORIZED, $resp->getStatusCode());
     }
 
+    /** Abonnement à un studio sans contenu publié (donc non public) : 404. */
     public function testSubscribeReturns404ForNonPublicStudio(): void
     {
         $client = static::createClient();
@@ -199,6 +212,7 @@ final class StudioSubscriptionTest extends ApiTestCase
     // de test avec le studio fourni).
     // ----------------------------------------------------------------
 
+    /** Crée un film au statut donné (titre et slug uniques) ; un film PUBLISHED rend public le studio de test, déjà actif et validé. */
     private function seedFilm(EntityManagerInterface $em, Studio $studio, string $status): Film
     {
         $uid = bin2hex(random_bytes(4));

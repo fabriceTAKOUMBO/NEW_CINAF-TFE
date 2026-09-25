@@ -1,15 +1,23 @@
+# Un chargeur de routes par « bounded context » du monolithe modulaire. Tout
+# nouveau dossier de contrôleurs doit être déclaré ici : sinon ses routes
+# n'existent tout simplement pas (404, sans aucune erreur au démarrage).
+
+# Routes publiques et utilisateur connecté : auth, utilisateurs, catalogue,
+# pages publiques des studios, abonnements, webhook Stripe.
 controllers:
     resource:
         path: ../src/Controller/
         namespace: App\Controller
     type: attribute
 
+# Espace administrateur : /api/admin/* (ROLE_ADMIN).
 admin_controllers:
     resource:
         path: ../src/Admin/Controller/
         namespace: App\Admin\Controller
     type: attribute
 
+# Espace studio : /api/studio/* (ROLE_CREATEUR), y compris /api/studio/onboarding.
 studio_controllers:
     resource:
         path: ../src/Studio/Controller/

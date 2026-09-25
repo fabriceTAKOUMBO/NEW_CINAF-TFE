@@ -1,8 +1,13 @@
 security:
+    # `auto` : Symfony choisit le meilleur algorithme disponible (bcrypt ou
+    # argon2) pour hacher les mots de passe des utilisateurs.
     password_hashers:
         App\Entity\User:
             algorithm: auto
 
+    # Utilisateurs chargés depuis la table `user` par leur email (identifiant de
+    # connexion et claim `username` du JWT). Le pare-feu recharge l'utilisateur
+    # à chaque requête : ce sont les rôles en base qui font foi, pas ceux du jeton.
     providers:
         app_user_provider:
             entity:
@@ -13,9 +18,10 @@ security:
     # ROLE_ADMIN n'hérite PAS de ROLE_CREATEUR. Séparation stricte : un admin
     # qui veut accéder aux endpoints producteur doit explicitement avoir
     # ROLE_CREATEUR (ce qui n'est pas le cas par défaut). Cela évite qu'un
-    # admin puisse modifier des contenus producteur via /api/producer/*
-    # sans contrôle d'ownership (les controllers Producer reposent sur
-    # `currentStudio = user.getStudio()` qui serait `null` pour un admin pur).
+    # admin puisse modifier des contenus studio via /api/studio/*
+    # sans contrôle d'ownership (les contrôleurs studio obtiennent le studio via
+    # StudioOwnershipChecker::getStudioForUser(), soit `user.getStudio()`, qui
+    # serait `null` pour un admin pur).
     role_hierarchy:
         ROLE_ABONNE: ROLE_USER
         ROLE_CREATEUR: ROLE_USER
@@ -24,16 +30,25 @@ security:
         ROLE_ADMIN: [ROLE_MODERATEUR, ROLE_ABONNE, ROLE_USER]
 
     firewalls:
+        # Profiler, barre de debug et ressources statiques : aucune sécurité.
         dev:
             pattern: ^/(_(profiler|wdt)|css|images|js)/
             security: false
 
+        # Toute l'API : sans session (stateless), authentification par le JWT
+        # de l'en-tête `Authorization: Bearer ...` (authenticator de lexik).
+        # Pas de `json_login` : l'émission des jetons est codée dans
+        # AuthController (/api/auth/login).
         api:
             pattern: ^/api
             stateless: true
             provider: app_user_provider
             jwt: ~
 
+    # Symfony applique la PREMIÈRE règle dont le motif correspond au chemin :
+    # les exceptions doivent donc précéder les règles génériques. Une route /api
+    # qui ne correspond à aucune règle reste ouverte aux anonymes au niveau du
+    # pare-feu (le contrôleur peut encore restreindre par #[IsGranted]).
     access_control:
         - { path: ^/api/auth/login, roles: PUBLIC_ACCESS }
         - { path: ^/api/auth/register, roles: PUBLIC_ACCESS }
@@ -61,10 +76,12 @@ security:
         # Phase H — défense en profondeur : `^/api/studio` exige ROLE_CREATEUR
         # même si les controllers ont déjà `#[IsGranted('ROLE_CREATEUR')]`
         # au niveau classe. Filet de sécurité au cas où l'attribut serait
-        # oublié sur un nouveau contrôleur ajouté dans `src/Producer/`.
+        # oublié sur un nouveau contrôleur ajouté dans `src/Studio/`.
         - { path: ^/api/studio, roles: ROLE_CREATEUR }
         - { path: ^/api/admin, roles: ROLE_ADMIN }
 
+# En test : hachage volontairement peu coûteux (paramètres de coût très bas)
+# pour accélérer la suite PHPUnit, qui crée et hache de nombreux mots de passe.
 when@test:
     security:
         password_hashers:

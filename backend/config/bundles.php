@@ -1,5 +1,14 @@
 <?php
 
+/**
+ * Bundles Symfony activés, avec les environnements où ils le sont
+ * (`all`, `dev`, `test`). Lu par le Kernel (MicroKernelTrait).
+ *
+ * À noter : MakerBundle (générateurs de code) n'existe qu'en dev ;
+ * DoctrineFixturesBundle qu'en dev et test, les fixtures (comptes de démo)
+ * ne peuvent donc pas être chargées en production. FlysystemBundle reste
+ * chargé bien que son stockage ne soit plus utilisé (cf. flysystem.yaml).
+ */
 return [
     Symfony\Bundle\FrameworkBundle\FrameworkBundle::class => ['all' => true],
     ApiPlatform\Symfony\Bundle\ApiPlatformBundle::class => ['all' => true],

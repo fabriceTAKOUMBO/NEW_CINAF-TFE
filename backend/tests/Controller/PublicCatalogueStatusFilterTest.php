@@ -17,9 +17,17 @@ use Symfony\Component\PasswordHasher\Hasher\UserPasswordHasherInterface;
  *  DRAFT et WITHDRAWN sont totalement invisibles pour les non-propriétaires,
  *  y compris en accédant à leur URL directe — réponse 404, jamais 403."
  *
- * Ce test couvre les endpoints publics /api/films, /api/series et /api/episodes
- * (les endpoints studio /api/studio/* et admin /api/admin/* sont hors périmètre
- * et restent inchangés — voir tests/Studio et tests/Admin pour leur couverture).
+ * Ce test couvre les endpoints publics /api/films, /api/series et le contrôle
+ * can-play de /api/catalogue/discover en source `db` ; /api/episodes n'y est
+ * pas testé (les endpoints studio /api/studio/* et admin /api/admin/* sont hors
+ * périmètre et restent inchangés — voir tests/Studio et tests/Admin pour leur
+ * couverture).
+ *
+ * Chaque test vide d'abord les tables du catalogue (cleanCatalogueTables())
+ * pour maîtriser les totaux, puis crée ses films / séries dans un studio de
+ * test partagé.
+ *
+ * Lancement : php bin/phpunit tests/Controller/PublicCatalogueStatusFilterTest.php
  */
 class PublicCatalogueStatusFilterTest extends ApiTestCase
 {
@@ -27,6 +35,7 @@ class PublicCatalogueStatusFilterTest extends ApiTestCase
     // /api/films — listings et recherche n'exposent que PUBLISHED
     // -----------------------------------------------------------------------
 
+    /** GET /api/films : seul le film PUBLISHED est listé, et le total ne compte que lui (1). */
     public function testListFilmsHidesDraftAndWithdrawn(): void
     {
         $client = static::createClient();
@@ -47,6 +56,7 @@ class PublicCatalogueStatusFilterTest extends ApiTestCase
         $this->assertSame(1, $body['total'], 'Le total ne doit compter que les films PUBLISHED');
     }
 
+    /** GET /api/films/search : parmi trois titres correspondants, seul le film PUBLISHED est renvoyé. */
     public function testSearchFilmsHidesDraftAndWithdrawn(): void
     {
         $client = static::createClient();
@@ -66,6 +76,7 @@ class PublicCatalogueStatusFilterTest extends ApiTestCase
         $this->assertNotContains('Mystère Atlantique Retiré', $titles);
     }
 
+    /** GET /api/films/{id} sur un brouillon (DRAFT) → 404, et surtout pas 403. */
     public function testGetFilmDraftReturns404NotFound(): void
     {
         $client = static::createClient();
@@ -80,6 +91,7 @@ class PublicCatalogueStatusFilterTest extends ApiTestCase
         $this->assertNotSame(Response::HTTP_FORBIDDEN, $response->getStatusCode());
     }
 
+    /** GET /api/films/{id} sur un film retiré (WITHDRAWN) → 404. */
     public function testGetFilmWithdrawnReturns404NotFound(): void
     {
         $client = static::createClient();
@@ -92,6 +104,7 @@ class PublicCatalogueStatusFilterTest extends ApiTestCase
         $this->assertSame(Response::HTTP_NOT_FOUND, $response->getStatusCode());
     }
 
+    /** GET /api/films/{id} sur un film PUBLISHED → 200 avec son titre (cas témoin). */
     public function testGetFilmPublishedReturns200(): void
     {
         $client = static::createClient();
@@ -109,6 +122,7 @@ class PublicCatalogueStatusFilterTest extends ApiTestCase
     // /api/series — listings et recherche n'exposent que PUBLISHED
     // -----------------------------------------------------------------------
 
+    /** GET /api/series : seule la série PUBLISHED est listée, et le total ne compte qu'elle (1). */
     public function testListSeriesHidesDraftAndWithdrawn(): void
     {
         $client = static::createClient();
@@ -129,6 +143,7 @@ class PublicCatalogueStatusFilterTest extends ApiTestCase
         $this->assertSame(1, $body['total']);
     }
 
+    /** GET /api/series/search : la série PUBLISHED est trouvée, pas le brouillon de même titre. */
     public function testSearchSeriesHidesDraftAndWithdrawn(): void
     {
         $client = static::createClient();
@@ -146,6 +161,7 @@ class PublicCatalogueStatusFilterTest extends ApiTestCase
         $this->assertNotContains('Sentinelle Brouillon', $titles);
     }
 
+    /** GET /api/series/{id} sur un brouillon (DRAFT) → 404, et surtout pas 403. */
     public function testGetSerieDraftReturns404NotFound(): void
     {
         $client = static::createClient();
@@ -159,6 +175,7 @@ class PublicCatalogueStatusFilterTest extends ApiTestCase
         $this->assertNotSame(Response::HTTP_FORBIDDEN, $response->getStatusCode());
     }
 
+    /** GET /api/series/{id} sur une série retirée (WITHDRAWN) → 404. */
     public function testGetSerieWithdrawnReturns404NotFound(): void
     {
         $client = static::createClient();
@@ -171,6 +188,7 @@ class PublicCatalogueStatusFilterTest extends ApiTestCase
         $this->assertSame(Response::HTTP_NOT_FOUND, $response->getStatusCode());
     }
 
+    /** GET /api/series/{id}/seasons sur un brouillon → 404 (les sous-ressources suivent la série). */
     public function testGetSerieSeasonsOnDraftReturns404(): void
     {
         $client = static::createClient();
@@ -187,8 +205,15 @@ class PublicCatalogueStatusFilterTest extends ApiTestCase
     // /api/catalogue/discover — can-play 404 sur DRAFT/WITHDRAWN
     // -----------------------------------------------------------------------
 
+    /**
+     * GET /api/catalogue/discover/{slug}/can-play (source `db`, utilisateur
+     * connecté) sur un film DRAFT → 404 : l'œuvre est traitée comme inexistante.
+     */
     public function testCanPlayOnDraftReturns404(): void
     {
+        // Source `db` forcée AVANT le démarrage du kernel, pour que
+        // %env(CATALOGUE_SOURCE)% soit résolu avec cette valeur (elle n'est
+        // pas restaurée à la fin du test).
         $_ENV['CATALOGUE_SOURCE'] = 'db';
         $_SERVER['CATALOGUE_SOURCE'] = 'db';
         putenv('CATALOGUE_SOURCE=db');
@@ -203,8 +228,12 @@ class PublicCatalogueStatusFilterTest extends ApiTestCase
         $this->assertSame(Response::HTTP_NOT_FOUND, $response->getStatusCode());
     }
 
+    /**
+     * Même scénario que testCanPlayOnDraftReturns404() sur un film WITHDRAWN → 404.
+     */
     public function testCanPlayOnWithdrawnReturns404(): void
     {
+        // Même bascule de source que dans le test précédent.
         $_ENV['CATALOGUE_SOURCE'] = 'db';
         $_SERVER['CATALOGUE_SOURCE'] = 'db';
         putenv('CATALOGUE_SOURCE=db');
@@ -223,6 +252,11 @@ class PublicCatalogueStatusFilterTest extends ApiTestCase
     // Helpers (copiés du pattern CatalogueDiscoverControllerTest)
     // -----------------------------------------------------------------------
 
+    /**
+     * Studio de test partagé (slug fixe) : créé au premier appel avec son
+     * propriétaire ROLE_CREATEUR, puis réutilisé, car la base n'est pas remise
+     * à zéro entre deux tests.
+     */
     private function ensureStudio(): Studio
     {
         /** @var EntityManagerInterface $em */
@@ -253,6 +287,7 @@ class PublicCatalogueStatusFilterTest extends ApiTestCase
         return $studio;
     }
 
+    /** Persiste un film du studio dans le statut demandé (publishedAt renseigné seulement si PUBLISHED). */
     private function createFilm(Studio $studio, string $title, string $status, string $slug): Film
     {
         /** @var EntityManagerInterface $em */
@@ -273,6 +308,7 @@ class PublicCatalogueStatusFilterTest extends ApiTestCase
         return $film;
     }
 
+    /** Persiste une série (sans saison) du studio dans le statut demandé, comme createFilm(). */
     private function createSerie(Studio $studio, string $title, string $status, string $slug): Serie
     {
         /** @var EntityManagerInterface $em */
@@ -292,15 +328,23 @@ class PublicCatalogueStatusFilterTest extends ApiTestCase
         return $serie;
     }
 
+    /**
+     * Vide les tables du catalogue en SQL direct, pour que les listes et
+     * totaux ne voient que les contenus créés par le test courant.
+     */
     private function cleanCatalogueTables(): void
     {
         /** @var EntityManagerInterface $em */
         $em = static::getContainer()->get(EntityManagerInterface::class);
         $conn = $em->getConnection();
+        // Ordre imposé par les clés étrangères sans ON DELETE CASCADE :
+        // épisodes, puis saisons, puis séries ; les films en dernier.
         $conn->executeStatement('DELETE FROM episode');
         $conn->executeStatement('DELETE FROM season');
         $conn->executeStatement('DELETE FROM serie');
         $conn->executeStatement('DELETE FROM film');
+        // Le SQL direct contourne l'ORM : on vide l'identity map pour ne pas
+        // garder en mémoire des entités qui n'existent plus en base.
         $em->clear();
     }
 }
