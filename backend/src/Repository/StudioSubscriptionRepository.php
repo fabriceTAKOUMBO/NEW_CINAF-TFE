@@ -58,6 +58,33 @@ class StudioSubscriptionRepository extends ServiceEntityRepository
     }
 
     /**
+     * Nombre d'abonnés par studio, en UNE requête pour toute une page de
+     * résultats (les listes publiques faisaient un COUNT par studio).
+     *
+     * @param  list<Studio>       $studios
+     * @return array<string, int> id du studio (RFC 4122) => nombre
+     */
+    public function countByStudios(array $studios): array
+    {
+        if ($studios === []) {
+            return [];
+        }
+        $rows = $this->createQueryBuilder('s')
+            ->select('IDENTITY(s.studio) AS studioId, COUNT(s.id) AS nb')
+            ->andWhere('s.studio IN (:studios)')
+            ->setParameter('studios', $studios)
+            ->groupBy('s.studio')
+            ->getQuery()
+            ->getArrayResult();
+
+        $counts = [];
+        foreach ($rows as $row) {
+            $counts[(string) $row['studioId']] = (int) $row['nb'];
+        }
+        return $counts;
+    }
+
+    /**
      * Récupère l'abonnement existant pour un couple (user, studio), ou
      * `null` s'il n'existe pas. Utilisé côté contrôleur DELETE pour
      * retirer la ligne en base.

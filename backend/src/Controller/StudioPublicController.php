@@ -59,19 +59,19 @@ class StudioPublicController extends AbstractController
         // On expose la version publique enrichie des compteurs pour que la
         // carte studio puisse afficher « X films · Y séries · Z abonnés »
         // sans 2e appel.
-        $members = array_map(
-            fn (Studio $s) => $s->toPublicArray(
-                $this->filmRepo->countByStudioAndStatus($s, Film::STATUS_PUBLISHED),
-                $this->serieRepo->countByStudioAndStatus($s, Serie::STATUS_PUBLISHED),
-                $this->subscriptionRepo->countByStudio($s),
-            ),
-            $studios,
-        );
+        $members = $this->toPublicArrays($studios);
 
-        return new JsonResponse([
+        $response = new JsonResponse([
             'hydra:member' => $members,
             'hydra:totalItems' => $total,
         ]);
+        // Liste publique identique pour tous : le navigateur peut la réutiliser
+        // 60 s (même politique que le catalogue public, cf. CatalogueDiscoverController).
+        $response->setPublic();
+        $response->setMaxAge(60);
+        $response->setSharedMaxAge(60);
+
+        return $response;
     }
 
     /**
@@ -91,16 +91,26 @@ class StudioPublicController extends AbstractController
 
         $studios = $this->studioRepo->searchPublicByName($q, 20);
 
-        $data = array_map(
-            fn (Studio $s) => $s->toPublicArray(
-                $this->filmRepo->countByStudioAndStatus($s, Film::STATUS_PUBLISHED),
-                $this->serieRepo->countByStudioAndStatus($s, Serie::STATUS_PUBLISHED),
-                $this->subscriptionRepo->countByStudio($s),
-            ),
-            $studios,
-        );
+        return new JsonResponse($this->toPublicArrays($studios));
+    }
 
-        return new JsonResponse($data);
+    /**
+     * Versions publiques enrichies des compteurs pour une page de studios :
+     * 3 requêtes agrégées pour toute la page, au lieu de 3 par studio.
+     *
+     * @param  list<Studio>               $studios
+     * @return list<array<string, mixed>>
+     */
+    private function toPublicArrays(array $studios): array
+    {
+        $films = $this->filmRepo->countByStudiosAndStatus($studios, Film::STATUS_PUBLISHED);
+        $series = $this->serieRepo->countByStudiosAndStatus($studios, Serie::STATUS_PUBLISHED);
+        $subscribers = $this->subscriptionRepo->countByStudios($studios);
+
+        return array_map(function (Studio $s) use ($films, $series, $subscribers) {
+            $id = $s->getId()->toRfc4122();
+            return $s->toPublicArray($films[$id] ?? 0, $series[$id] ?? 0, $subscribers[$id] ?? 0);
+        }, $studios);
     }
 
     /**

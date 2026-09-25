@@ -1230,3 +1230,191 @@ a:hover {
   color: var(--cinaf-gold);
   font-size: 1.2rem;
 }
+
+/* ============================================================
+   Fiche détail d'œuvre (films/[id], series/[id]) — façon cinaf.tv
+   ============================================================ */
+
+/* Hero : backdrop plein cadre (affiche floutée) + fondu vers le fond */
+.work-hero {
+  position: relative;
+  overflow: hidden;
+  background: var(--cinaf-bg);
+}
+.work-hero-backdrop {
+  position: absolute;
+  inset: -40px;                 /* déborde pour masquer les bords du flou */
+  background-size: cover;
+  background-position: center 20%;
+  filter: blur(28px) saturate(1.1);
+  opacity: 0.45;
+}
+.work-hero-fade {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(to right, rgba(10, 10, 10, 0.85) 0%, rgba(10, 10, 10, 0.55) 55%, rgba(10, 10, 10, 0.25) 100%),
+    linear-gradient(to bottom, rgba(10, 10, 10, 0.2) 0%, rgba(10, 10, 10, 0.3) 60%, var(--cinaf-bg) 100%);
+}
+.work-hero-poster {
+  max-width: 280px;
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.7);
+}
+.work-hero-title {
+  color: #fff;
+  font-weight: 800;
+  font-size: clamp(1.9rem, 4.5vw, 3.4rem);
+  line-height: 1.1;
+  text-shadow: 0 2px 20px rgba(0, 0, 0, 0.7);
+  margin-bottom: 0.6rem;
+}
+.work-hero-meta {
+  color: var(--cinaf-text);
+  font-weight: 600;
+  font-size: 0.95rem;
+  margin-bottom: 1rem;
+}
+.work-hero-dot {
+  color: var(--cinaf-gold);
+  margin: 0 0.5rem;
+}
+.work-hero-premium {
+  color: var(--cinaf-gold);
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  margin: 0.25rem 0 0.75rem;
+}
+.work-hero-synopsis {
+  color: var(--cinaf-text);
+  max-width: 68ch;
+  line-height: 1.65;
+  margin-bottom: 0;
+}
+
+/* Onglets « Épisodes · Contenu associé · Détails » */
+.work-tabs {
+  display: flex;
+  gap: 1.75rem;
+  border-bottom: 1px solid var(--cinaf-border);
+  margin-bottom: 1.5rem;
+  overflow-x: auto;
+}
+.work-tab {
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  color: var(--cinaf-text-muted);
+  font-weight: 600;
+  padding: 0.75rem 0;
+  white-space: nowrap;
+  transition: color 0.15s, border-color 0.15s;
+}
+.work-tab:hover,
+.work-tab:focus-visible {
+  color: var(--cinaf-text);
+  outline: none;
+}
+.work-tab.active {
+  color: var(--cinaf-gold);
+  border-bottom-color: var(--cinaf-gold);
+}
+
+/* Cartes d'épisodes (grille) */
+.episode-card {
+  display: block;
+  text-decoration: none;
+  color: inherit;
+  background: var(--cinaf-surface);
+  border: 1px solid var(--cinaf-border);
+  border-radius: 10px;
+  overflow: hidden;
+  transition: transform 0.2s, border-color 0.2s, box-shadow 0.2s;
+}
+.episode-card:hover,
+.episode-card:focus-visible {
+  transform: translateY(-3px);
+  border-color: var(--cinaf-gold);
+  box-shadow: var(--cinaf-shadow-gold);
+  color: inherit;
+  outline: none;
+}
+.episode-card-thumb {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  background: #000;
+  overflow: hidden;
+}
+.episode-card-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0.85;
+}
+.episode-card-play {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  font-size: 2.2rem;
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.8);
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+.episode-card:hover .episode-card-play {
+  opacity: 1;
+}
+.episode-card-body {
+  padding: 0.65rem 0.8rem 0.8rem;
+}
+.episode-card-number {
+  color: var(--cinaf-gold);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.episode-card-title {
+  color: var(--cinaf-text);
+  font-weight: 600;
+  font-size: 0.92rem;
+  line-height: 1.3;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.episode-card-meta {
+  color: var(--cinaf-text-muted);
+  font-size: 0.8rem;
+  margin-top: 0.25rem;
+}
+
+/* Fiche « Détails » (liste libellé / valeur) */
+.work-details {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.6rem 1.5rem;
+  max-width: 760px;
+}
+.work-details dt {
+  color: var(--cinaf-text-muted);
+  font-weight: 500;
+}
+.work-details dd {
+  color: var(--cinaf-text);
+  margin: 0;
+}
+@media (max-width: 576px) {
+  .work-details {
+    grid-template-columns: 1fr;
+    gap: 0.15rem;
+  }
+  .work-details dd {
+    margin-bottom: 0.6rem;
+  }
+}

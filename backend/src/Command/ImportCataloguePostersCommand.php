@@ -5,6 +5,7 @@ use App\Entity\Film;
 use App\Entity\Serie;
 use App\Repository\FilmRepository;
 use App\Repository\SerieRepository;
+use App\Service\BunnyStorageService;
 use App\Service\BunnyZoneRegistry;
 use Doctrine\ORM\EntityManagerInterface;
 use GuzzleHttp\Client;
@@ -78,6 +79,12 @@ class ImportCataloguePostersCommand extends Command
             InputOption::VALUE_REQUIRED,
             'Chemin d\'un sitemap local, au lieu de le télécharger.',
         );
+        $this->addOption(
+            'fill-missing',
+            null,
+            InputOption::VALUE_NONE,
+            'Attribue une affiche arbitraire (titre non apparié) à toute œuvre restée sans affiche, contenu studio compris.',
+        );
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
@@ -85,6 +92,7 @@ class ImportCataloguePostersCommand extends Command
         $io = new SymfonyStyle($input, $output);
         $dryRun = (bool) $input->getOption('dry-run');
         $minScore = (float) $input->getOption('min-score');
+        $fillMissing = (bool) $input->getOption('fill-missing');
 
         $io->title($dryRun ? 'Import des affiches (DRY-RUN)' : 'Import des affiches');
 
@@ -114,19 +122,13 @@ class ImportCataloguePostersCommand extends Command
         $storage = $this->zones->get($this->imagesZone);
         $applied = 0;
         $noAsset = [];
+        // Œuvres ayant reçu une affiche dans cette exécution (en dry-run rien
+        // n'est écrit sur l'entité, on suit donc les identités à part).
+        $served = [];
+        $usedTitles = [];
         foreach ($matches['matched'] as $m) {
-            $url = null;
-            foreach (self::POSTER_DIRS as $dir) {
-                try {
-                    $listing = $storage->listContents("titles/{$m['titleId']}/$dir", false);
-                } catch (\Throwable) {
-                    continue;
-                }
-                if (!empty($listing['files'])) {
-                    $url = $storage->getPublicUrl($listing['files'][0]['path']);
-                    break;
-                }
-            }
+            $usedTitles[$m['titleId']] = true;
+            $url = $this->resolvePosterUrl($storage, $m['titleId']);
 
             if ($url === null) {
                 $noAsset[] = $m['work']->getTitle();
@@ -136,16 +138,92 @@ class ImportCataloguePostersCommand extends Command
             if (!$dryRun) {
                 $m['work']->setPoster($url);
             }
+            $served[spl_object_id($m['work'])] = true;
             $applied++;
         }
+
+        $filled = $fillMissing
+            ? $this->fillMissing($storage, $titles, $usedTitles, $served, $dryRun)
+            : [];
 
         if (!$dryRun) {
             $this->em->flush();
         }
 
-        $this->report($io, $matches, $applied, $noAsset, $dryRun);
+        $this->report($io, $matches, $applied, $noAsset, $filled, $dryRun);
 
         return Command::SUCCESS;
+    }
+
+    /**
+     * Repli : chaque œuvre encore sans affiche (importée ou studio) reçoit
+     * l'affiche d'un titre cinaf.tv non consommé par l'appariement. Le visuel
+     * ne correspond donc pas à l'œuvre — choix assumé pour ne laisser aucune
+     * carte vide. Un titre n'est réutilisé que si le pool est épuisé.
+     *
+     * @param  list<array{id:string, slug:string, norm:string}> $titles
+     * @param  array<string,bool>                              $usedTitles
+     * @param  array<int,bool>                                 $served
+     * @return list<array{work:Film|Serie, slug:string}>
+     */
+    private function fillMissing(
+        BunnyStorageService $storage,
+        array $titles,
+        array $usedTitles,
+        array $served,
+        bool $dryRun,
+    ): array {
+        $missing = array_filter(
+            array_merge($this->filmRepo->findAll(), $this->serieRepo->findAll()),
+            static fn($w) => $w->getPoster() === null && !isset($served[spl_object_id($w)]),
+        );
+        if ($missing === []) {
+            return [];
+        }
+
+        // Pool des affiches réellement disponibles parmi les titres libres.
+        $pool = [];
+        foreach ($titles as $title) {
+            if (isset($usedTitles[$title['id']])) {
+                continue;
+            }
+            $url = $this->resolvePosterUrl($storage, $title['id']);
+            if ($url !== null) {
+                $pool[] = ['slug' => $title['slug'], 'url' => $url];
+            }
+            if (count($pool) >= count($missing)) {
+                break;
+            }
+        }
+        if ($pool === []) {
+            return [];
+        }
+
+        $filled = [];
+        foreach (array_values($missing) as $i => $work) {
+            $pick = $pool[$i % count($pool)];
+            if (!$dryRun) {
+                $work->setPoster($pick['url']);
+            }
+            $filled[] = ['work' => $work, 'slug' => $pick['slug']];
+        }
+        return $filled;
+    }
+
+    /** Première image trouvée pour un titre, format portrait en priorité. */
+    private function resolvePosterUrl(BunnyStorageService $storage, string $titleId): ?string
+    {
+        foreach (self::POSTER_DIRS as $dir) {
+            try {
+                $listing = $storage->listContents("titles/$titleId/$dir", false);
+            } catch (\Throwable) {
+                continue;
+            }
+            if (!empty($listing['files'])) {
+                return $storage->getPublicUrl($listing['files'][0]['path']);
+            }
+        }
+        return null;
     }
 
     /**
@@ -310,8 +388,9 @@ class ImportCataloguePostersCommand extends Command
     /**
      * @param array{matched: list<array<string,mixed>>, unmatched: list<string>} $matches
      * @param list<string>                                                      $noAsset
+     * @param list<array{work:Film|Serie, slug:string}>                         $filled
      */
-    private function report(SymfonyStyle $io, array $matches, int $applied, array $noAsset, bool $dryRun): void
+    private function report(SymfonyStyle $io, array $matches, int $applied, array $noAsset, array $filled, bool $dryRun): void
     {
         $byConfidence = ['exact' => 0, 'inclusion' => 0, 'approché' => 0];
         foreach ($matches['matched'] as $m) {
@@ -325,6 +404,9 @@ class ImportCataloguePostersCommand extends Command
         $io->writeln(sprintf('  dont approchées      : %d', $byConfidence['approché']));
         $io->writeln(sprintf('  Sans fichier image   : %d', count($noAsset)));
         $io->writeln(sprintf('  Sans correspondance  : %d', count($matches['unmatched'])));
+        if ($filled !== []) {
+            $io->writeln(sprintf('  Affiches arbitraires : %d (--fill-missing)', count($filled)));
+        }
 
         // Les correspondances non exactes sont celles qui peuvent se tromper :
         // on les liste systématiquement pour relecture.
@@ -356,10 +438,22 @@ class ImportCataloguePostersCommand extends Command
             }
         }
 
+        // Ces affiches ne correspondent pas à l'œuvre : listées pour relecture.
+        if ($filled !== []) {
+            $io->section(sprintf('Affiches arbitraires attribuées (%d)', count($filled)));
+            foreach ($filled as $f) {
+                $io->writeln(sprintf('  %-34s ← %s', $f['work']->getTitle(), $f['slug']));
+            }
+        }
+
         if ($dryRun) {
             $io->warning('DRY-RUN — aucune écriture en base.');
         } else {
-            $io->success(sprintf('%d affiche(s) enregistrée(s).', $applied));
+            $io->success(sprintf(
+                '%d affiche(s) enregistrée(s)%s.',
+                $applied,
+                $filled !== [] ? sprintf(' + %d arbitraire(s)', count($filled)) : '',
+            ));
         }
     }
 }

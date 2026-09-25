@@ -8,6 +8,18 @@ RUN install-php-extensions pdo_pgsql intl opcache apcu zip
 # Configuration PHP de production (opcache activé, erreurs masquées).
 RUN mv "$PHP_INI_DIR/php.ini-production" "$PHP_INI_DIR/php.ini"
 
+# OPcache prod : le code ne change jamais à chaud dans l'image (tout déploiement
+# = nouvelle image), donc pas de re-vérification des timestamps — sinon PHP fait
+# un stat() par fichier inclus (~900) à chaque requête. Cache mémoire élargi et
+# cache des chemins réels allongé pour la même raison.
+RUN { \
+      echo 'opcache.validate_timestamps=0'; \
+      echo 'opcache.memory_consumption=256'; \
+      echo 'opcache.max_accelerated_files=20000'; \
+      echo 'realpath_cache_size=4096K'; \
+      echo 'realpath_cache_ttl=600'; \
+    } > "$PHP_INI_DIR/conf.d/zz-opcache-prod.ini"
+
 # Binaire Composer.
 COPY --from=composer/composer:2-bin /composer /usr/bin/composer
 

@@ -62,7 +62,7 @@ export default function DevenirProducteurPage() {
         if (!cancelled) {
           setHasStudio(true);
           router.replace("/studio");
-        }
+        }  
       } catch {
         if (!cancelled) setHasStudio(false);
       }

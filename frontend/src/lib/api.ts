@@ -934,6 +934,11 @@ export interface DiscoverEpisode {
   name: string;
   hlsUrl: string | null;
   mp4Url: string | null;
+  /** Champs éditoriaux servis en mode DB uniquement (absents en source `bunny`). */
+  number?: number;
+  /** Durée en minutes, null si inconnue. */
+  duration?: number | null;
+  synopsis?: string | null;
 }
 
 export interface DiscoverSeason {
@@ -973,6 +978,25 @@ export interface DiscoverStudioRef {
 export interface DiscoverWork extends DiscoverWorkSummary {
   seasons: DiscoverSeason[];
   studio?: DiscoverStudioRef | null;
+  /**
+   * Métadonnées éditoriales de la fiche (mode DB uniquement). Toutes
+   * optionnelles : les œuvres importées n'ont ni année, ni durée, ni genres —
+   * la page détail masque chaque information absente.
+   */
+  synopsis?: string | null;
+  year?: number | null;
+  /** Films : durée en minutes. */
+  duration?: number | null;
+  /** Séries : nombre de saisons. */
+  nbSeasons?: number;
+  genres?: string[];
+  countries?: string[];
+  /** Films uniquement. */
+  directors?: string[];
+  /** Films uniquement. */
+  cast?: string[];
+  /** Manifest HLS de la bande-annonce, ou null. */
+  trailerUrl?: string | null;
 }
 
 /**

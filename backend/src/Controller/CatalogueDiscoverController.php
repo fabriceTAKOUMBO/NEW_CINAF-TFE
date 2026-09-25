@@ -35,6 +35,15 @@ class CatalogueDiscoverController extends AbstractController
     private const SOURCE_BUNNY = 'bunny';
     private const SOURCE_DB = 'db';
     private const HLS_MANIFEST = 'master.m3u8';
+    /** Durée (s) de réutilisation des réponses publiques par le navigateur / CDN. */
+    private const PUBLIC_CACHE_TTL = 60;
+
+    /**
+     * Synopsis posé par `app:catalogue:import-bunny` sur les œuvres importées.
+     * Il n'a rien d'éditorial : la fiche publique le masque (null) plutôt que
+     * de l'afficher aux visiteurs.
+     */
+    private const IMPORT_PLACEHOLDER_SYNOPSIS = 'Importé depuis le catalogue Bunny CINAF.';
 
     public function __construct(
         private readonly BunnyCatalogueService $catalogue,
@@ -57,12 +66,12 @@ class CatalogueDiscoverController extends AbstractController
         $kindFilter = in_array($kind, ['film', 'serie'], true) ? $kind : null;
 
         if ($this->catalogueSource === self::SOURCE_DB) {
-            return $this->json($this->listFromDb(
+            return $this->publicCache($this->json($this->listFromDb(
                 $q !== null ? (string) $q : null,
                 $kindFilter,
                 max(1, $page),
                 max(1, min(100, $limit)),
-            ));
+            )));
         }
 
         try {
@@ -79,7 +88,21 @@ class CatalogueDiscoverController extends AbstractController
             ], 502);
         }
 
-        return $this->json($result);
+        return $this->publicCache($this->json($result));
+    }
+
+    /**
+     * Le catalogue public est identique pour tous les visiteurs : on autorise
+     * navigateur et CDN à réutiliser la réponse 60 s. Sur un aller-retour
+     * home → fiche → home, le navigateur ne rappelle plus l'API du tout.
+     * Pas de cache sur `can-play` (dépend de l'utilisateur) ni sur les erreurs.
+     */
+    private function publicCache(JsonResponse $response): JsonResponse
+    {
+        $response->setPublic();
+        $response->setMaxAge(self::PUBLIC_CACHE_TTL);
+        $response->setSharedMaxAge(self::PUBLIC_CACHE_TTL);
+        return $response;
     }
 
     /**
@@ -123,7 +146,7 @@ class CatalogueDiscoverController extends AbstractController
             if ($work === null) {
                 return $this->json(['message' => "Œuvre '$slug' introuvable."], 404);
             }
-            return $this->json($work);
+            return $this->publicCache($this->json($work));
         }
 
         try {
@@ -139,7 +162,7 @@ class CatalogueDiscoverController extends AbstractController
             return $this->json(['message' => "Œuvre '$slug' introuvable."], 404);
         }
 
-        return $this->json($work);
+        return $this->publicCache($this->json($work));
     }
 
     // -----------------------------------------------------------------------
@@ -285,6 +308,17 @@ class CatalogueDiscoverController extends AbstractController
             // Référence studio (null en mode catalogue Bunny live, sinon dérivée de l'entité)
             // — permet à la page détail d'afficher « Publié par {studio} » avec lien vers la chaîne.
             'studio' => $this->mapStudioRef($film->getStudio()),
+            // Métadonnées éditoriales de la fiche (façon cinaf.tv). Les valeurs
+            // absentes sont null / [] : les œuvres importées n'ont ni année, ni
+            // durée, ni genres — seul le contenu saisi via le Studio est complet.
+            'synopsis' => $this->publicSynopsis($film->getSynopsis()),
+            'year' => $film->getYear() ?: null,
+            'duration' => $film->getDuration() ?: null,
+            'genres' => $this->names($film->getGenres()),
+            'countries' => $this->names($film->getCountries()),
+            'directors' => $this->personNames($film->getDirectors()),
+            'cast' => $this->personNames($film->getCast()),
+            'trailerUrl' => $this->trailerUrl($film->getTrailerVideoId()),
             'seasons' => [[
                 'slug' => 'principale',
                 'name' => 'Œuvre',
@@ -307,8 +341,14 @@ class CatalogueDiscoverController extends AbstractController
                     'name' => $episode->getTitle(),
                     'hlsUrl' => $bunnyPath ? $this->buildHlsUrl($bunnyPath) : null,
                     'mp4Url' => null,
+                    'number' => $this->episodeNumber($episode),
+                    'duration' => $episode->getDuration() ?: null,
+                    'synopsis' => $episode->getSynopsis() ?: null,
                 ];
             }
+            // L'import numérote dans l'ordre des dossiers Bunny, qui n'est pas
+            // celui des épisodes : on ordonne sur le numéro réel.
+            usort($episodes, static fn($a, $b) => $a['number'] <=> $b['number']);
             $seasons[] = [
                 'slug' => $this->slugify(sprintf('saison-%d', $season->getNumber())),
                 'name' => $season->getTitle() ?? sprintf('Saison %d', $season->getNumber()),
@@ -322,8 +362,65 @@ class CatalogueDiscoverController extends AbstractController
             'poster' => $serie->getPoster(),
             // Cf. mapFilmToDiscover.
             'studio' => $this->mapStudioRef($serie->getStudio()),
+            'synopsis' => $this->publicSynopsis($serie->getSynopsis()),
+            'year' => $serie->getYear() ?: null,
+            'nbSeasons' => count($seasons),
+            'genres' => $this->names($serie->getGenres()),
+            'countries' => $this->names($serie->getCountries()),
+            'trailerUrl' => $this->trailerUrl($serie->getTrailerVideoId()),
             'seasons' => $seasons,
         ];
+    }
+
+    /**
+     * Numéro réel de l'épisode : celui porté par le nom du dossier Bunny
+     * (« …_EP_4 », « EPISODE 12 ») quand il existe, sinon le numéro en base.
+     */
+    private function episodeNumber(Episode $episode): int
+    {
+        if (preg_match('/EP(?:ISODE)?[\s_-]*(\d{1,3})\b/i', $episode->getTitle(), $m)) {
+            return (int) $m[1];
+        }
+        return $episode->getNumber();
+    }
+
+    /** Synopsis affichable, ou null s'il s'agit du texte technique de l'import. */
+    private function publicSynopsis(string $synopsis): ?string
+    {
+        $synopsis = trim($synopsis);
+        return $synopsis === '' || $synopsis === self::IMPORT_PLACEHOLDER_SYNOPSIS ? null : $synopsis;
+    }
+
+    /**
+     * @param  iterable<\App\Entity\Genre|\App\Entity\Country> $items
+     * @return list<string>
+     */
+    private function names(iterable $items): array
+    {
+        $out = [];
+        foreach ($items as $item) {
+            $out[] = $item->getName();
+        }
+        return $out;
+    }
+
+    /**
+     * @param  iterable<\App\Entity\Person> $people
+     * @return list<string>
+     */
+    private function personNames(iterable $people): array
+    {
+        $out = [];
+        foreach ($people as $p) {
+            $out[] = trim($p->getFirstName() . ' ' . $p->getLastName());
+        }
+        return $out;
+    }
+
+    /** La bande-annonce est un dossier Bunny Storage converti en HLS, comme les vidéos. */
+    private function trailerUrl(?string $bunnyPath): ?string
+    {
+        return $bunnyPath !== null && $bunnyPath !== '' ? $this->buildHlsUrl($bunnyPath) : null;
     }
 
     /**

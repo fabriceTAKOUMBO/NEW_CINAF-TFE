@@ -2,9 +2,9 @@
 
 // ============================================================
 // CINAF v2 — Détail Film (alimenté par catalogue Bunny)
-// Films courts/teasers (œuvre flat) — bouton "Regarder" direct
-// vers le 1er épisode disponible. Design inspiré de cinaf.tv :
-// hero cinématographique + liste d'épisodes soignée.
+// Design calqué sur la page titre de cinaf.tv : hero plein cadre
+// (WorkDetailHero) puis onglets Épisodes / Contenu associé / Détails
+// (WorkDetailTabs). Le studio éditeur reste visible sur la fiche.
 // ============================================================
 
 import { useEffect, useState } from "react";
@@ -12,7 +12,7 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 import { discover, type DiscoverWork } from "@/lib/api";
 import WorkDetailHero from "@/components/WorkDetailHero";
-import EpisodeList from "@/components/EpisodeList";
+import WorkDetailTabs from "@/components/WorkDetailTabs";
 
 /**
  * Fiche détaillée d'un film.
@@ -20,8 +20,9 @@ import EpisodeList from "@/components/EpisodeList";
  * Fonctionnalités :
  * - Charge les métadonnées de l'œuvre via son slug depuis l'API `discover.get`.
  * - Redirige vers `/series/[id]` si l'œuvre est identifiée comme une série.
- * - Restitue la bannière héroïque cinématographique (`WorkDetailHero`) avec bouton direct "Regarder".
- * - Affiche la liste des parties ou épisodes (`EpisodeList`) si le film est découpé en plusieurs segments.
+ * - Restitue le hero cinématographique (`WorkDetailHero`) avec bouton direct "Regarder".
+ * - Affiche les onglets de la fiche (`WorkDetailTabs`) : parties du film si
+ *   l'œuvre est découpée, contenu associé, détails.
  * 
  * @returns La vue détaillée du film.
  */
@@ -98,22 +99,10 @@ export default function FilmDetailPage() {
     );
   }
 
-  const allEpisodes = work.seasons.flatMap((s) => s.episodes);
-  const firstEpisode = allEpisodes[0];
   const firstSeason = work.seasons[0];
-
-  // Pastilles de métadonnées (données réellement disponibles côté Bunny).
-  const metaItems = ["HD"];
-  if (allEpisodes.length > 1) metaItems.push(`${allEpisodes.length} épisodes`);
-
-  // Numéro de départ par saison (les films sont généralement mono-saison,
-  // mais certaines œuvres multi-parties sont classées Film).
-  let running = 1;
-  const seasonBlocks = work.seasons.map((season) => {
-    const start = running;
-    running += season.episodes.length;
-    return { season, start };
-  });
+  const firstEpisode = firstSeason?.episodes[0];
+  const hrefFor = (seasonSlug: string, epSlug: string) =>
+    `/watch/film/${slug}?ep=${encodeURIComponent(epSlug)}&s=${encodeURIComponent(seasonSlug)}`;
 
   return (
     <div>
@@ -121,58 +110,10 @@ export default function FilmDetailPage() {
         work={work}
         backHref="/films"
         backLabel="Retour aux films"
-        metaItems={metaItems}
-        actions={
-          firstEpisode && firstSeason ? (
-            <Link
-              href={`/watch/film/${slug}?ep=${encodeURIComponent(
-                firstEpisode.slug,
-              )}&s=${encodeURIComponent(firstSeason.slug)}`}
-              className="btn btn-cinaf px-4"
-            >
-              <i className="bi bi-play-fill me-1" />
-              Regarder
-            </Link>
-          ) : null
-        }
+        playHref={firstEpisode && firstSeason ? hrefFor(firstSeason.slug, firstEpisode.slug) : null}
+        playLabel="Regarder"
       />
-
-      {/* Liste des épisodes si l'œuvre en contient plus d'un — couvre les
-          films courts à plusieurs parties ET les œuvres multi-épisodes mal
-          classifiées en Film mais correctement résolues par le backend. */}
-      {allEpisodes.length > 1 && (
-        <div className="container py-5">
-          <h4 className="mb-3" style={{ color: "var(--cinaf-text)", fontWeight: 700 }}>
-            <i className="bi bi-collection-play me-2" style={{ color: "var(--cinaf-gold)" }} />
-            Épisodes
-            <span
-              className="badge ms-2"
-              style={{ background: "var(--cinaf-gold)", color: "#000", fontSize: "0.7rem" }}
-            >
-              {allEpisodes.length}
-            </span>
-          </h4>
-
-          {seasonBlocks.map(({ season, start }) => (
-            <div key={season.slug} className="mb-3">
-              {work.seasons.length > 1 && (
-                <h6 className="mb-2" style={{ color: "var(--cinaf-text-muted)" }}>
-                  {season.name.replace(/_/g, " ")}
-                </h6>
-              )}
-              <EpisodeList
-                episodes={season.episodes}
-                startNumber={start}
-                hrefFor={(ep) =>
-                  `/watch/film/${slug}?ep=${encodeURIComponent(
-                    ep.slug,
-                  )}&s=${encodeURIComponent(season.slug)}`
-                }
-              />
-            </div>
-          ))}
-        </div>
-      )}
+      <WorkDetailTabs work={work} hrefFor={(seasonSlug, ep) => hrefFor(seasonSlug, ep.slug)} />
     </div>
   );
 }

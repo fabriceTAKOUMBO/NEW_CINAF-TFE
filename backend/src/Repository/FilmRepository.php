@@ -102,6 +102,35 @@ class FilmRepository extends ServiceEntityRepository
             ->getSingleScalarResult();
     }
 
+    /**
+     * Nombre de films par studio pour un statut, en UNE requête (les listes
+     * publiques affichaient un COUNT par studio : N+1).
+     *
+     * @param  list<Studio>       $studios
+     * @return array<string, int> id du studio (RFC 4122) => nombre
+     */
+    public function countByStudiosAndStatus(array $studios, string $status): array
+    {
+        if ($studios === []) {
+            return [];
+        }
+        $rows = $this->createQueryBuilder('f')
+            ->select('IDENTITY(f.studio) AS studioId, COUNT(f.id) AS nb')
+            ->andWhere('f.studio IN (:studios)')
+            ->andWhere('f.status = :status')
+            ->setParameter('studios', $studios)
+            ->setParameter('status', $status)
+            ->groupBy('f.studio')
+            ->getQuery()
+            ->getArrayResult();
+
+        $counts = [];
+        foreach ($rows as $row) {
+            $counts[(string) $row['studioId']] = (int) $row['nb'];
+        }
+        return $counts;
+    }
+
     public function countByStudio(Studio $studio): int
     {
         return (int) $this->createQueryBuilder('f')

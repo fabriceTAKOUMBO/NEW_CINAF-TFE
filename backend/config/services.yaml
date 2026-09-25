@@ -67,6 +67,15 @@ services:
         decorates: 'api_platform.openapi.factory'
         arguments: ['@.inner']
 
+    # Second décorateur : documente toutes les routes /api encore absentes, à
+    # partir du routeur (descriptions dans App\OpenApi\RouteDocumentation).
+    # Priorité -10 : il s'applique APRÈS OpenApiFactory (priorité 0), dont il
+    # respecte les descriptions écrites à la main.
+    App\OpenApi\RouteOpenApiFactory:
+        decorates: 'api_platform.openapi.factory'
+        decoration_priority: -10
+        arguments: ['@.inner', '@router', '@security.access_map']
+
     # BunnyStorageService est instancié à la demande par BunnyZoneRegistry,
     # pas par l'autowire global (chaque zone a sa propre AccessKey).
     App\Service\BunnyStorageService:

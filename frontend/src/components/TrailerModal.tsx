@@ -2,120 +2,163 @@
 
 /**
  * ============================================================
- * CINAF v2 — Modal bande-annonce (Bootstrap Modal + BunnyPlayer)
+ * CINAF v2 — Pop-up de bande-annonce (TrailerModal)
  * ============================================================
- * Ce composant affiche une fenêtre modale plein écran dédiée au visionnage
- * de la bande-annonce d'un film ou d'une série.
- * 
- * Intégration et cycle de vie :
- * - Charge dynamiquement la bibliothèque JavaScript de Bootstrap côté client.
- * - Instancie une fenêtre modale Bootstrap avec gestion des touches (Échap) et du backdrop.
- * - Synchronise l'événement de fermeture natif (`hidden.bs.modal`) avec le callback React `onClose`.
- * - Détruit proprement l'instance Bootstrap (`dispose()`) au démontage pour éviter les fuites de mémoire.
- * - Démarre automatiquement la lecture vidéo via `BunnyPlayer` dès l'ouverture.
+ * Fenêtre modale dédiée à la lecture de la bande-annonce d'une œuvre, ouverte
+ * depuis le hero des fiches films et séries (`WorkDetailHero`). La
+ * bande-annonce est un manifeste HLS Bunny (`DiscoverWork.trailerUrl`), lu par
+ * le même lecteur que les vidéos (`HlsPlayer`).
+ *
+ * Choix de conception :
+ * - Modale pilotée par React, sans le JavaScript de Bootstrap : l'état `open`
+ *   du parent est l'unique source de vérité, aucune désynchronisation possible
+ *   avec une instance `bootstrap.Modal`. Seules les classes CSS `.modal*` de
+ *   Bootstrap sont réutilisées (même approche que `WithdrawalDialog`).
+ * - Rendue dans `document.body` via un portail : elle passe toujours au-dessus
+ *   de la navbar sticky, quel que soit le conteneur qui l'appelle.
+ * - Arrêt garanti à la fermeture : le lecteur n'existe que tant que la modale
+ *   est ouverte. Fermer la modale démonte `HlsPlayer`, qui détruit son
+ *   instance hls.js, met la vidéo en pause et libère sa source : plus de son
+ *   ni de téléchargement de segments en arrière-plan.
+ * - Fermeture par le bouton ✕, la touche Échap ou un clic hors du lecteur.
+ *   Pendant l'ouverture, le défilement de la page est bloqué et le focus
+ *   clavier reste dans la modale ; à la fermeture, le focus revient sur le
+ *   bouton qui a ouvert la modale.
  */
 
 import { useEffect, useRef } from "react";
-import BunnyPlayer from "./BunnyPlayer";
+import { createPortal } from "react-dom";
+import HlsPlayer from "./HlsPlayer";
 
 /**
  * Propriétés attendues par le composant `TrailerModal`.
  */
 interface TrailerModalProps {
-  /** Identifiant Bunny Video ID de la bande-annonce */
-  trailerBunnyId: string;
-  /** État d'affichage de la modale (true = affichée, false = masquée) */
-  show: boolean;
-  /** Fonction de rappel invoquée lors de la fermeture de la modale */
+  /** État d'affichage de la modale (true = ouverte) */
+  open: boolean;
+  /** URL du manifeste HLS de la bande-annonce */
+  src: string;
+  /** Titre lisible de l'œuvre, affiché dans l'en-tête de la modale */
+  title: string;
+  /** Image affichée par le lecteur avant le démarrage de la lecture */
+  poster?: string;
+  /** Fonction de rappel invoquée pour fermer la modale */
   onClose: () => void;
 }
 
 /**
- * Modale de lecture de bande-annonce vidéo.
- * 
+ * Pop-up de lecture de la bande-annonce d'une œuvre.
+ *
  * @param props - Propriétés de la modale
- * @returns La modale Bootstrap contenant le lecteur vidéo Bunny
+ * @returns La modale rendue dans `document.body`, ou `null` si elle est fermée
  */
-export default function TrailerModal({
-  trailerBunnyId,
-  show,
-  onClose,
-}: TrailerModalProps) {
-  // Référence vers l'élément DOM de la modale
-  const modalRef = useRef<HTMLDivElement>(null);
+export default function TrailerModal({ open, src, title, poster, onClose }: TrailerModalProps) {
+  const portalRootRef = useRef<HTMLDivElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  // Vrai si le dernier appui de souris a commencé sur le fond de la modale.
+  const pressStartedOnOverlay = useRef(false);
 
-  // Gestion du cycle de vie de la modale Bootstrap
+  // Ouverture : bloque le défilement de la page, place le focus sur ✕ et l'y
+  // retient. Fermeture (ou démontage de la page) : tout est rétabli et le
+  // focus revient à l'élément qui avait ouvert la modale.
   useEffect(() => {
-    if (typeof window === "undefined") return;
+    if (!open) return;
+    const previouslyFocused = document.activeElement as HTMLElement | null;
 
-    let bsModal: { show: () => void; hide: () => void; dispose: () => void } | null = null;
+    // Blocage sur <html> et non sur <body> : globals.css pose
+    // `overflow-x: hidden` sur les deux, ce qui fait de <html> le conteneur
+    // qui défile — un `overflow: hidden` sur <body> ne bloquerait rien. La
+    // largeur de la barre de défilement masquée est compensée pour que la
+    // page ne se décale pas derrière le fond.
+    const root = document.documentElement;
+    const previousOverflow = root.style.overflow;
+    const previousPaddingRight = root.style.paddingRight;
+    const scrollbarWidth = window.innerWidth - root.clientWidth;
+    root.style.overflow = "hidden";
+    if (scrollbarWidth > 0) root.style.paddingRight = `${scrollbarWidth}px`;
 
-    // Chargement asynchrone du bundle JavaScript Bootstrap
-    import("bootstrap/dist/js/bootstrap.bundle.min.js").then((bs) => {
-      if (!modalRef.current) return;
-      
-      // Instanciation de la modale Bootstrap sur l'élément DOM
-      bsModal = new bs.Modal(modalRef.current, { backdrop: true, keyboard: true });
+    // Le reste de la page devient inerte (ni focus, ni clic, ignoré des
+    // lecteurs d'écran) : la tabulation ne peut plus quitter la modale. Un
+    // simple renvoi du focus ne suffit pas : le navigateur ferait d'abord
+    // défiler la page masquée jusqu'à l'élément extérieur visité.
+    const inerted = Array.from(document.body.children).filter(
+      (el) => el !== portalRootRef.current && !el.hasAttribute("inert"),
+    );
+    inerted.forEach((el) => el.setAttribute("inert", ""));
 
-      // Synchronisation de l'événement de fermeture "physique" avec l'état React
-      modalRef.current?.addEventListener("hidden.bs.modal", onClose);
+    closeButtonRef.current?.focus();
 
-      // Si la prop 'show' change, on déclenche l'affichage
-      if (show && bsModal) {
-        bsModal.show();
-      }
-    });
-
-    // Nettoyage au démontage pour éviter les fuites de mémoire et les doublons d'instances
     return () => {
-      if (bsModal) {
-        try {
-          bsModal.dispose();
-        } catch {
-          // ignore
-        }
-      }
+      // `inert` d'abord retiré : un élément inerte ne peut pas recevoir le focus.
+      inerted.forEach((el) => el.removeAttribute("inert"));
+      root.style.overflow = previousOverflow;
+      root.style.paddingRight = previousPaddingRight;
+      previouslyFocused?.focus();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [show]);
+  }, [open]);
 
-  return (
-    <div
-      className="modal fade"
-      ref={modalRef}
-      tabIndex={-1}
-      aria-hidden="true"
-    >
-      <div className="modal-dialog modal-dialog-centered modal-lg">
+  // Touche Échap. Effet séparé : `onClose` peut changer d'identité à chaque
+  // rendu du parent sans relancer le blocage du défilement ni le focus.
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [open, onClose]);
+
+  if (!open) return null;
+
+  return createPortal(
+    // Conteneur unique : c'est le seul enfant de <body> laissé actif.
+    <div ref={portalRootRef}>
+      {/* Fond obscurci, plus opaque qu'un dialogue classique (ambiance salle) */}
+      <div className="modal-backdrop fade show" style={{ opacity: 0.85 }} />
+
+      {/* Un clic ne ferme la modale que s'il commence ET finit sur le fond :
+          glisser la barre de progression de la vidéo puis relâcher en dehors
+          ne doit pas fermer la bande-annonce. */}
+      <div
+        className="modal fade show d-block"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="trailer-modal-title"
+        tabIndex={-1}
+        onMouseDown={(e) => {
+          pressStartedOnOverlay.current = e.target === e.currentTarget;
+        }}
+        onClick={(e) => {
+          if (pressStartedOnOverlay.current && e.target === e.currentTarget) onClose();
+        }}
+      >
+        {/* Largeur bornée par la hauteur de l'écran : la vidéo 16:9 et son
+            en-tête restent entièrement visibles, même sur un écran bas. */}
         <div
-          className="modal-content"
-          style={{
-            backgroundColor: "#000",
-            border: "1px solid var(--cinaf-border)",
-          }}
+          className="modal-dialog modal-dialog-centered modal-xl"
+          style={{ maxWidth: "min(1140px, calc((100vh - 9rem) * 16 / 9))" }}
         >
-          <div
-            className="modal-header border-0"
-            style={{ padding: "0.75rem 1rem" }}
-          >
-            <h6 className="modal-title" style={{ color: "var(--cinaf-text)" }}>
-              <i className="bi bi-play-circle me-2" style={{ color: "var(--cinaf-gold)" }} />
-              Bande-annonce
-            </h6>
-            <button
-              type="button"
-              className="btn-close btn-close-white"
-              data-bs-dismiss="modal"
-              aria-label="Fermer"
-            />
-          </div>
-          <div className="modal-body p-0">
-            {show && trailerBunnyId && (
-              <BunnyPlayer videoId={trailerBunnyId} autoplay />
-            )}
+          <div className="modal-content">
+            <div className="modal-header border-0 py-2">
+              <h5 id="trailer-modal-title" className="modal-title">
+                <i className="bi bi-film me-2" style={{ color: "var(--cinaf-gold)" }} />
+                Bande-annonce — {title}
+              </h5>
+              <button
+                ref={closeButtonRef}
+                type="button"
+                className="btn-close btn-close-white"
+                aria-label="Fermer la bande-annonce"
+                onClick={onClose}
+              />
+            </div>
+            <div className="modal-body p-0">
+              <HlsPlayer src={src} autoplay poster={poster} />
+            </div>
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

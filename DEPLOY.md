@@ -166,3 +166,13 @@ docker compose -f compose.prod.yaml exec backend php bin/console doctrine:migrat
 ```
 
 > Sauvegardes de la base : gérées automatiquement par le CloudDB OVH (onglet Backup / restauration).
+
+## Performance (prod)
+
+- L'image backend fixe `opcache.validate_timestamps=0` (cf. `backend/Dockerfile`) : PHP ne
+  re-vérifie plus les fichiers à chaque requête. Conséquence : **toute mise à jour du code
+  passe par un rebuild de l'image** (`docker compose -f compose.prod.yaml up -d --build`),
+  ce qui est déjà la procédure ci-dessus — ne jamais modifier du PHP à chaud dans le conteneur.
+- Le catalogue public (`/api/catalogue/discover*`) est servi avec `Cache-Control: public,
+  max-age=60, s-maxage=60` : Caddy / un CDN peuvent le mettre en cache 60 s.
+

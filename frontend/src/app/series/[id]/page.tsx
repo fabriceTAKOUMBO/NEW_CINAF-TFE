@@ -2,8 +2,10 @@
 
 // ============================================================
 // CINAF v2 — Détail Série (alimenté par catalogue Bunny)
-// Design inspiré de cinaf.tv : hero cinématographique + sélecteur
-// de saison (pastilles) + liste d'épisodes soignée.
+// Design calqué sur la page titre de cinaf.tv : hero plein cadre
+// (WorkDetailHero) puis onglets Épisodes (sélecteur de saison, grille)
+// / Contenu associé / Détails (WorkDetailTabs). Le studio éditeur reste
+// visible sur la fiche.
 // ============================================================
 
 import { useEffect, useState } from "react";
@@ -11,7 +13,7 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 import { discover, type DiscoverWork } from "@/lib/api";
 import WorkDetailHero from "@/components/WorkDetailHero";
-import EpisodeList from "@/components/EpisodeList";
+import WorkDetailTabs from "@/components/WorkDetailTabs";
 
 /**
  * Fiche détaillée d'une série télévisée.
@@ -19,9 +21,9 @@ import EpisodeList from "@/components/EpisodeList";
  * Fonctionnalités :
  * - Charge l'arborescence complète de la série (saisons et épisodes) via son slug (`discover.get`).
  * - Redirige vers `/films/[id]` si l'œuvre est identifiée comme un film.
- * - Affiche le hero cinématographique (`WorkDetailHero`) avec bouton pour lancer le 1er épisode.
- * - Permet de basculer entre les différentes saisons via un sélecteur d'onglets.
- * - Restitue la grille des épisodes correspondants avec durée et statut de visionnage.
+ * - Affiche le hero cinématographique (`WorkDetailHero`) avec bouton « Lire S.1 Ép.1 ».
+ * - Délègue aux onglets (`WorkDetailTabs`) le sélecteur de saison, la grille
+ *   d'épisodes, le contenu associé et les détails.
  * 
  * @returns La vue détaillée de la série.
  */
@@ -32,8 +34,6 @@ export default function SerieDetailPage() {
   const [work, setWork] = useState<DiscoverWork | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  // Saison sélectionnée dans le sélecteur (slug). Vide = 1re saison par défaut.
-  const [selectedSeason, setSelectedSeason] = useState<string>("");
 
   useEffect(() => {
     let cancelled = false;
@@ -100,19 +100,15 @@ export default function SerieDetailPage() {
     );
   }
 
-  const totalEpisodes = work.seasons.reduce((acc, s) => acc + s.episodes.length, 0);
   const firstSeason = work.seasons[0];
   const firstEpisode = firstSeason?.episodes[0];
+  const hrefFor = (seasonSlug: string, epSlug: string) =>
+    `/watch/episode/${slug}?ep=${encodeURIComponent(epSlug)}&s=${encodeURIComponent(seasonSlug)}`;
 
-  // Saison affichée : celle du sélecteur, sinon la première.
-  const activeSeason =
-    work.seasons.find((s) => s.slug === selectedSeason) ?? firstSeason;
-
-  const metaItems = [
-    "HD",
-    `${work.seasons.length} saison${work.seasons.length > 1 ? "s" : ""}`,
-    `${totalEpisodes} épisode${totalEpisodes > 1 ? "s" : ""}`,
-  ];
+  // Libellé façon cinaf.tv : « Lire S.1 Ép.1 » (numéros réels si connus).
+  const playLabel = firstEpisode
+    ? `Lire S.${firstSeasonNumber(firstSeason.name)} Ép.${firstEpisode.number ?? 1}`
+    : "Regarder";
 
   return (
     <div>
@@ -120,61 +116,16 @@ export default function SerieDetailPage() {
         work={work}
         backHref="/series"
         backLabel="Retour aux séries"
-        metaItems={metaItems}
-        actions={
-          firstEpisode && firstSeason ? (
-            <Link
-              href={`/watch/episode/${slug}?ep=${encodeURIComponent(
-                firstEpisode.slug,
-              )}&s=${encodeURIComponent(firstSeason.slug)}`}
-              className="btn btn-cinaf px-4"
-            >
-              <i className="bi bi-play-fill me-1" />
-              Regarder le premier épisode
-            </Link>
-          ) : null
-        }
+        playHref={firstEpisode && firstSeason ? hrefFor(firstSeason.slug, firstEpisode.slug) : null}
+        playLabel={playLabel}
       />
-
-      <div className="container py-5">
-        <div className="d-flex align-items-center justify-content-between mb-3 flex-wrap gap-2">
-          <h4 className="mb-0" style={{ color: "var(--cinaf-text)", fontWeight: 700 }}>
-            <i className="bi bi-collection-play me-2" style={{ color: "var(--cinaf-gold)" }} />
-            Épisodes
-          </h4>
-
-          {/* Sélecteur de saison (pastilles) — masqué si une seule saison. */}
-          {work.seasons.length > 1 && (
-            <div className="d-flex flex-wrap gap-2" role="tablist" aria-label="Choisir une saison">
-              {work.seasons.map((season) => {
-                const isActive = activeSeason?.slug === season.slug;
-                return (
-                  <button
-                    key={season.slug}
-                    type="button"
-                    className={`filter-chip ${isActive ? "active" : ""}`}
-                    aria-pressed={isActive}
-                    onClick={() => setSelectedSeason(season.slug)}
-                  >
-                    {season.name.replace(/_/g, " ")}
-                  </button>
-                );
-              })}
-            </div>
-          )}
-        </div>
-
-        {activeSeason && (
-          <EpisodeList
-            episodes={activeSeason.episodes}
-            hrefFor={(ep) =>
-              `/watch/episode/${slug}?ep=${encodeURIComponent(
-                ep.slug,
-              )}&s=${encodeURIComponent(activeSeason.slug)}`
-            }
-          />
-        )}
-      </div>
+      <WorkDetailTabs work={work} hrefFor={(seasonSlug, ep) => hrefFor(seasonSlug, ep.slug)} />
     </div>
   );
+}
+
+/** Extrait le numéro de saison d'un nom (« SAISON_2 », « Saison 2 », « S3 »), 1 par défaut. */
+function firstSeasonNumber(name: string): number {
+  const m = name.match(/(\d+)/);
+  return m ? Number(m[1]) : 1;
 }

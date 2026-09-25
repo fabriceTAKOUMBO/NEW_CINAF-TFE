@@ -111,6 +111,22 @@ export default function HlsPlayer({
     }
   }, [src, fallbackMp4, autoplay]);
 
+  // Démontage du lecteur (fermeture du pop-up de bande-annonce, sortie de la
+  // page de lecture) : arrêt explicite de la vidéo et libération de sa source,
+  // quel que soit le mode de lecture (hls.js, HLS natif — Safari et Chrome
+  // récent — ou MP4). Sans cela, un flux natif ou MP4 pourrait continuer à se
+  // télécharger en arrière-plan. Déclaré après l'effet principal pour que
+  // hls.js se détache d'abord proprement (`hls.destroy()`).
+  useEffect(() => {
+    const video = videoRef.current;
+    return () => {
+      if (!video) return;
+      video.pause();
+      video.removeAttribute("src");
+      video.load();
+    };
+  }, []);
+
   return (
     <div
       style={{
