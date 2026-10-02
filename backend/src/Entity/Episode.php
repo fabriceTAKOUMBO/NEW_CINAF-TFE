@@ -51,7 +51,8 @@ class Episode
      * Chemin Bunny Storage de la vidéo (pas une URL ni un GUID malgré le nom) :
      * chemin importé (ne commence pas par `studios/`, ex. `12_CAS/CAS_1/CAS1_E01`)
      * ou upload studio `studios/{studio}/{serie}/saison-{N}/episode-{NN}/video.{ext}`.
-     * Le catalogue public en dérive l'URL HLS `{chemin}/master.m3u8`.
+     * Le catalogue public en dérive l'URL HLS `{chemin}/master.m3u8` (chemin
+     * importé) ou l'URL du fichier lui-même (upload studio, lu en MP4).
      */
     #[ORM\Column(length: 500, nullable: true)]
     private ?string $bunnyVideoId = null;

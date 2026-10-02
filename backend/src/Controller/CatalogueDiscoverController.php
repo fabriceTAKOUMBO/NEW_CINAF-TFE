@@ -50,6 +50,12 @@ class CatalogueDiscoverController extends AbstractController
     private const SOURCE_BUNNY = 'bunny';
     private const SOURCE_DB = 'db';
     private const HLS_MANIFEST = 'master.m3u8';
+    /**
+     * Extensions des fichiers vidéo déposés tels quels par le module Studio
+     * (cf. `StudioUploadController::VIDEO_EXT`). Un chemin stocké qui se
+     * termine ainsi désigne un fichier à lire directement, pas un dossier HLS.
+     */
+    private const DIRECT_VIDEO_EXTENSIONS = ['mp4', 'mov', 'webm'];
     /** Durée (s) de réutilisation des réponses publiques par le navigateur / CDN. */
     private const PUBLIC_CACHE_TTL = 60;
 
@@ -392,8 +398,7 @@ class CatalogueDiscoverController extends AbstractController
                 $episodes[] = [
                     'slug' => $single ? 'principal' : sprintf('partie-%d', $part->getNumber()),
                     'name' => $single ? $film->getTitle() : $part->getTitle(),
-                    'hlsUrl' => $this->buildHlsUrl($part->getBunnyVideoId()),
-                    'mp4Url' => null,
+                    ...$this->playbackSources($part->getBunnyVideoId()),
                 ];
             }
         } elseif (($bunnyPath = $film->getBunnyVideoId()) !== null && $bunnyPath !== '') {
@@ -402,8 +407,7 @@ class CatalogueDiscoverController extends AbstractController
             $episodes[] = [
                 'slug' => 'principal',
                 'name' => $film->getTitle(),
-                'hlsUrl' => $this->buildHlsUrl($bunnyPath),
-                'mp4Url' => null,
+                ...$this->playbackSources($bunnyPath),
             ];
         }
 
@@ -452,8 +456,9 @@ class CatalogueDiscoverController extends AbstractController
                 $episodes[] = [
                     'slug' => $this->slugify(sprintf('e-%02d', $episode->getNumber())),
                     'name' => $episode->getTitle(),
-                    'hlsUrl' => $bunnyPath ? $this->buildHlsUrl($bunnyPath) : null,
-                    'mp4Url' => null,
+                    ...($bunnyPath
+                        ? $this->playbackSources($bunnyPath)
+                        : ['hlsUrl' => null, 'mp4Url' => null]),
                     'number' => $this->episodeNumber($episode),
                     'duration' => $episode->getDuration() ?: null,
                     'synopsis' => $episode->getSynopsis() ?: null,
@@ -534,10 +539,18 @@ class CatalogueDiscoverController extends AbstractController
         return $out;
     }
 
-    /** La bande-annonce est un dossier Bunny Storage converti en HLS, comme les vidéos. */
+    /**
+     * URL de la bande-annonce, sous la même forme que les vidéos : manifeste
+     * HLS pour un dossier importé, URL du fichier pour une bande-annonce
+     * déposée par un studio (`trailer.mp4`) — le front lit les deux.
+     */
     private function trailerUrl(?string $bunnyPath): ?string
     {
-        return $bunnyPath !== null && $bunnyPath !== '' ? $this->buildHlsUrl($bunnyPath) : null;
+        if ($bunnyPath === null || $bunnyPath === '') {
+            return null;
+        }
+        $sources = $this->playbackSources($bunnyPath);
+        return $sources['hlsUrl'] ?? $sources['mp4Url'];
     }
 
     /**
@@ -559,11 +572,30 @@ class CatalogueDiscoverController extends AbstractController
     }
 
     /**
-     * Convertit un chemin Bunny Storage (`bunnyVideoId`, `trailerVideoId`,
-     * `FilmPart.bunnyVideoId`) en URL de lecture HLS servie par la pull zone
-     * de la zone catalogue.
+     * Sources de lecture d'une vidéo (`bunnyVideoId`, `FilmPart.bunnyVideoId`,
+     * `trailerVideoId`) selon la forme du chemin Bunny stocké :
+     *  - FICHIER vidéo déposé par un studio (`studios/…/video.mp4`) : l'upload
+     *    ne produit aucun rendu HLS, le fichier se lit tel quel →
+     *    `mp4Url` = son URL publique, `hlsUrl` = null (le lecteur du front
+     *    passe alors directement en lecture MP4) ;
+     *  - DOSSIER converti en HLS (contenu importé) → `hlsUrl` = manifeste.
      *
-     * Le chemin est traité comme un DOSSIER contenant un rendu HLS : on y
+     * Sans cette distinction, un upload studio donnait
+     * `…/video.mp4/master.m3u8` (404) et le lecteur restait noir.
+     *
+     * @return array{hlsUrl: ?string, mp4Url: ?string}
+     */
+    private function playbackSources(string $bunnyPath): array
+    {
+        $extension = strtolower(pathinfo($bunnyPath, PATHINFO_EXTENSION));
+        if (in_array($extension, self::DIRECT_VIDEO_EXTENSIONS, true)) {
+            return ['hlsUrl' => null, 'mp4Url' => $this->publicUrl($bunnyPath)];
+        }
+        return ['hlsUrl' => $this->buildHlsUrl($bunnyPath), 'mp4Url' => null];
+    }
+
+    /**
+     * Convertit le chemin d'un DOSSIER HLS en URL de son manifeste : on y
      * ajoute `/master.m3u8`. Exemple : `FILMS/CLEOPATRA/Cleopatra` →
      * `https://cinaftv-movies.b-cdn.net/FILMS/CLEOPATRA/Cleopatra/master.m3u8`.
      * Aucun appel réseau : l'existence du manifeste n'est pas vérifiée.
@@ -572,13 +604,23 @@ class CatalogueDiscoverController extends AbstractController
      */
     private function buildHlsUrl(string $bunnyPath): string
     {
+        return $this->publicUrl(trim($bunnyPath, '/') . '/' . self::HLS_MANIFEST);
+    }
+
+    /**
+     * URL publique d'un chemin Bunny Storage, servie par la pull zone de la
+     * zone catalogue.
+     *
+     * @return string URL absolue, ou chaîne vide si la zone catalogue n'est pas déclarée.
+     */
+    private function publicUrl(string $bunnyPath): string
+    {
         try {
             $storage = $this->zoneRegistry->get($this->catalogueZone);
         } catch (\InvalidArgumentException) {
             return '';
         }
-        $path = trim($bunnyPath, '/');
-        return $storage->getPublicUrl($path . '/' . self::HLS_MANIFEST);
+        return $storage->getPublicUrl(trim($bunnyPath, '/'));
     }
 
     /**

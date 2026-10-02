@@ -13,6 +13,8 @@
  * 3. En cas d'erreur fatale réseau (ex: playlist HLS non encore générée par l'encodeur CDN) :
  *    Bascule transparente et instantanée sur le fichier vidéo MP4 de secours (`fallbackMp4`).
  * 4. Gestion des sources vides ou invalides pour éviter le gel du lecteur à 0:00.
+ * 5. Lecture native (MP4, HLS natif) en échec : MP4 de secours s'il existe,
+ *    sinon message d'erreur — jamais de lecteur noir et muet.
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -59,11 +61,32 @@ export default function HlsPlayer({
     const trimmedSrc = typeof src === "string" ? src.trim() : "";
     const trimmedMp4 = typeof fallbackMp4 === "string" ? fallbackMp4.trim() : "";
 
+    // Lecture native (fichier MP4, ou HLS natif de Safari / Chrome récent) :
+    // seul l'événement `error` de la balise <video> signale un fichier
+    // introuvable ou illisible. Sans écouteur, le lecteur restait noir, sans
+    // aucun message. Depuis le HLS natif, le MP4 de secours est tenté d'abord.
+    const listenNativeErrors = (startedOnMp4: boolean) => {
+      let onMp4 = startedOnMp4;
+      const onError = () => {
+        if (!onMp4 && trimmedMp4) {
+          onMp4 = true;
+          video.src = trimmedMp4;
+          setUsingMp4(true);
+          if (autoplay) video.play().catch(() => {});
+          return;
+        }
+        setError("Impossible de charger cette vidéo. Réessayez plus tard.");
+      };
+      video.addEventListener("error", onError);
+      return () => video.removeEventListener("error", onError);
+    };
+
     // Cas 1 : Aucune source HLS fournie mais un fichier MP4 est présent → bascule immédiate en MP4
+    // (c'est le cas des vidéos déposées par un studio, servies telles quelles sans rendu HLS)
     if (!trimmedSrc && trimmedMp4) {
       video.src = trimmedMp4;
       setUsingMp4(true);
-      return;
+      return listenNativeErrors(true);
     }
 
     // Cas 2 : Aucune source vidéo exploitable du tout
@@ -75,7 +98,7 @@ export default function HlsPlayer({
     // Cas 3 : Navigateurs Apple (Safari / iOS) disposant d'un support natif HLS
     if (video.canPlayType("application/vnd.apple.mpegurl")) {
       video.src = trimmedSrc;
-      return;
+      return listenNativeErrors(false);
     }
 
     // Cas 4 : Navigateurs modernes supportant MediaSource Extensions (MSE) via hls.js
@@ -106,6 +129,7 @@ export default function HlsPlayer({
     if (trimmedMp4) {
       video.src = trimmedMp4;
       setUsingMp4(true);
+      return listenNativeErrors(true);
     } else {
       setError("Votre navigateur ne supporte pas la lecture HLS.");
     }

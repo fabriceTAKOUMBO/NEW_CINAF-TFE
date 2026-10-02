@@ -2,8 +2,10 @@
 
 namespace App\Tests\Controller;
 
+use App\Entity\Episode;
 use App\Entity\Film;
 use App\Entity\FilmPart;
+use App\Entity\Season;
 use App\Entity\Serie;
 use App\Entity\Studio;
 use App\Entity\User;
@@ -289,6 +291,74 @@ class CatalogueDiscoverControllerTest extends ApiTestCase
         // hlsUrl est construite à partir de `Film::bunnyVideoId` = 'BUNNY_DOWN'.
         $this->assertStringContainsString('BUNNY_DOWN', $body['seasons'][0]['episodes'][0]['hlsUrl']);
         $this->assertStringEndsWith('/master.m3u8', $body['seasons'][0]['episodes'][0]['hlsUrl']);
+    }
+
+    // -----------------------------------------------------------------------
+    // Vidéos déposées par un studio (2026-10-02) — l'upload stocke le chemin
+    // d'un FICHIER (`…/video.mp4`), sans rendu HLS : la fiche doit exposer
+    // l'URL du fichier (`mp4Url`), et non `…/video.mp4/master.m3u8` (404, le
+    // lecteur restait noir).
+    // -----------------------------------------------------------------------
+
+    /** Film studio : épisode `principal` lu en MP4 (hlsUrl null), bande-annonce = URL du fichier. */
+    public function test_db_source_studio_uploaded_film_is_played_as_mp4(): void
+    {
+        $client = static::createClient();
+        $this->cleanCatalogueTables();
+        $studio = $this->ensureStudio();
+        $film = $this->createFilmWithBunnyPath(
+            $studio,
+            'Film Studio',
+            Film::STATUS_PUBLISHED,
+            'film-studio-mp4',
+            'studios/discover-test-studio/film-studio-mp4/video.mp4',
+        );
+        $film->setTrailerVideoId('studios/discover-test-studio/film-studio-mp4/trailer.mp4');
+        static::getContainer()->get(EntityManagerInterface::class)->flush();
+
+        $response = $this->getJson($client, '/api/catalogue/discover/film-studio-mp4');
+        $body = $this->assertJsonResponse($response, Response::HTTP_OK);
+
+        $episode = $body['seasons'][0]['episodes'][0];
+        $this->assertSame('principal', $episode['slug']);
+        $this->assertNull($episode['hlsUrl']);
+        $this->assertStringEndsWith('/studios/discover-test-studio/film-studio-mp4/video.mp4', $episode['mp4Url']);
+        $this->assertStringEndsWith('/studios/discover-test-studio/film-studio-mp4/trailer.mp4', $body['trailerUrl']);
+    }
+
+    /** Épisode de série déposé par un studio : lu en MP4 ; un épisode importé (dossier) reste en HLS. */
+    public function test_db_source_studio_uploaded_episode_is_played_as_mp4(): void
+    {
+        $client = static::createClient();
+        $this->cleanCatalogueTables();
+        $studio = $this->ensureStudio();
+        $serie = $this->createSerie($studio, 'Serie Studio', Serie::STATUS_PUBLISHED, 'serie-studio-mp4');
+
+        /** @var EntityManagerInterface $em */
+        $em = static::getContainer()->get(EntityManagerInterface::class);
+        $season = (new Season())->setSerie($serie)->setNumber(1);
+        $em->persist($season);
+        $paths = [
+            1 => 'studios/discover-test-studio/serie-studio-mp4/saison-1/episode-01/video.mp4',
+            2 => 'SERIE_IMPORTEE/SAISON_1/EP_2',
+        ];
+        foreach ($paths as $number => $path) {
+            $episode = (new Episode())->setSeason($season)->setNumber($number)
+                ->setTitle('Episode ' . $number)->setDuration(30)->setBunnyVideoId($path);
+            $em->persist($episode);
+        }
+        $em->flush();
+        // La fiche relit la série depuis la base, saisons et épisodes compris.
+        $em->clear();
+
+        $response = $this->getJson($client, '/api/catalogue/discover/serie-studio-mp4');
+        $body = $this->assertJsonResponse($response, Response::HTTP_OK);
+
+        [$uploaded, $imported] = $body['seasons'][0]['episodes'];
+        $this->assertNull($uploaded['hlsUrl']);
+        $this->assertStringEndsWith('/saison-1/episode-01/video.mp4', $uploaded['mp4Url']);
+        $this->assertStringEndsWith('/SERIE_IMPORTEE/SAISON_1/EP_2/master.m3u8', $imported['hlsUrl']);
+        $this->assertNull($imported['mp4Url']);
     }
 
     // -----------------------------------------------------------------------

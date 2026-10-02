@@ -6,7 +6,9 @@ use App\Entity\Subscription;
 use App\Entity\SubscriptionPlan;
 use App\Entity\User;
 use App\Service\SubscriptionService;
+use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
 use Doctrine\ORM\EntityManagerInterface;
+use Stripe\Checkout\Session as CheckoutSession;
 use Stripe\Event as StripeEvent;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 use Symfony\Component\PasswordHasher\Hasher\UserPasswordHasherInterface;
@@ -20,7 +22,9 @@ use Symfony\Component\Uid\Uuid;
  *
  * Couvre la création idempotente (`checkout.session.completed`), le
  * rafraîchissement de `endsAt` (`customer.subscription.updated`), l'expiration
- * (`customer.subscription.deleted`) et l'ignorance des autres événements.
+ * (`customer.subscription.deleted`) et l'ignorance des autres événements, ainsi
+ * que l'activation au retour du client (`fulfillCheckoutSession()`, ajoutée le
+ * 2026-09-26) et l'unicité de l'abonnement Stripe en base.
  * Chaque test crée son propre utilisateur et son propre plan (noms uniques) ;
  * rien n'est nettoyé, la base de test étant recréée par run-tests.ps1.
  * Lancement : `php bin/phpunit tests/Service/SubscriptionServiceStripeSyncTest.php`.
@@ -204,6 +208,91 @@ final class SubscriptionServiceStripeSyncTest extends KernelTestCase
     }
 
     /**
+     * Retour du client après paiement (session `complete` + `paid`) : l'abonnement
+     * est actif tout de suite, sans attendre le webhook — le cas signalé le
+     * 2026-09-26, où le webhook n'arrivait jamais en local.
+     */
+    public function testReturnFulfillmentActivatesPaidSession(): void
+    {
+        [$user, $plan] = $this->seedUserAndPlan();
+        $session = $this->buildSession($user, $plan, 'sub_return_'.uniqid());
+
+        $this->assertTrue($this->service->fulfillCheckoutSession($session, $user));
+
+        $sub = $this->em->getRepository(Subscription::class)->findOneBy(['user' => $user]);
+        $this->assertNotNull($sub);
+        $this->assertSame(Subscription::STATUS_ACTIVE, $sub->getStatus());
+        $this->assertTrue($this->service->hasActiveSubscription($user));
+    }
+
+    /**
+     * Retour du client, puis webhook, puis rechargement de la page de succès :
+     * un seul abonnement est créé, les signaux suivants renvoient false.
+     */
+    public function testReturnFulfillmentAndWebhookCreateOnlyOneSubscription(): void
+    {
+        [$user, $plan] = $this->seedUserAndPlan();
+        $stripeSubId = 'sub_both_'.uniqid();
+        $session = $this->buildSession($user, $plan, $stripeSubId);
+
+        $this->assertTrue($this->service->fulfillCheckoutSession($session, $user));
+        $this->assertFalse($this->service->syncFromStripeEvent(
+            $this->buildEvent('checkout.session.completed', $session->toArray()),
+        ), 'Le webhook arrivé après le retour est un no-op');
+        $this->assertFalse($this->service->fulfillCheckoutSession($session, $user), 'Rechargement de la page');
+
+        $this->assertSame(1, $this->em->getRepository(Subscription::class)
+            ->count(['stripeSubscriptionId' => $stripeSubId]));
+    }
+
+    /** La session payée par un autre utilisateur ne peut pas être activée : rien n'est créé. */
+    public function testReturnFulfillmentRefusesSessionOfAnotherUser(): void
+    {
+        [$owner, $plan] = $this->seedUserAndPlan();
+        [$intruder] = $this->seedUserAndPlan();
+        $session = $this->buildSession($owner, $plan, 'sub_other_'.uniqid());
+
+        $this->assertFalse($this->service->fulfillCheckoutSession($session, $intruder));
+
+        $repo = $this->em->getRepository(Subscription::class);
+        $this->assertSame(0, $repo->count(['user' => $owner]));
+        $this->assertSame(0, $repo->count(['user' => $intruder]));
+    }
+
+    /** Paiement non abouti (session encore ouverte, ou terminée mais impayée) : aucune activation. */
+    public function testReturnFulfillmentIgnoresUnpaidSession(): void
+    {
+        [$user, $plan] = $this->seedUserAndPlan();
+        $open = $this->buildSession($user, $plan, 'sub_open_'.uniqid(), status: 'open', paymentStatus: 'unpaid');
+        $unpaid = $this->buildSession($user, $plan, 'sub_unpaid_'.uniqid(), paymentStatus: 'unpaid');
+
+        $this->assertFalse($this->service->fulfillCheckoutSession($open, $user));
+        $this->assertFalse($this->service->fulfillCheckoutSession($unpaid, $user));
+        $this->assertFalse($this->service->hasActiveSubscription($user));
+    }
+
+    /**
+     * Garde-fou en base (migration Version20260926100000) : deux lignes ne
+     * peuvent pas porter le même abonnement Stripe. C'est ce qui départage le
+     * retour du client et le webhook s'ils arrivent au même instant.
+     */
+    public function testStripeSubscriptionIdIsUniqueInDatabase(): void
+    {
+        [$user, $plan] = $this->seedUserAndPlan();
+        $stripeSubId = 'sub_unique_'.uniqid();
+        foreach ([1, 2] as $ignored) {
+            $sub = new Subscription();
+            $sub->setUser($user);
+            $sub->setPlan($plan);
+            $sub->setStripeSubscriptionId($stripeSubId);
+            $this->em->persist($sub);
+        }
+
+        $this->expectException(UniqueConstraintViolationException::class);
+        $this->em->flush();
+    }
+
+    /**
      * Crée en base un utilisateur (email unique) et un plan mensuel actif doté
      * d'un stripePriceId factice.
      *
@@ -237,6 +326,33 @@ final class SubscriptionServiceStripeSyncTest extends KernelTestCase
         $this->em->flush();
 
         return [$user, $plan];
+    }
+
+    /**
+     * Construit la session Checkout que StripeService::retrieveCheckoutSession()
+     * renverrait au retour du client : mode abonnement, métadonnées posées par
+     * createCheckoutSession(), statut et état du paiement paramétrables.
+     */
+    private function buildSession(
+        User $user,
+        SubscriptionPlan $plan,
+        string $stripeSubId,
+        string $status = 'complete',
+        string $paymentStatus = 'paid',
+    ): CheckoutSession {
+        return CheckoutSession::constructFrom([
+            'id' => 'cs_test_'.uniqid(),
+            'object' => 'checkout.session',
+            'mode' => 'subscription',
+            'status' => $status,
+            'payment_status' => $paymentStatus,
+            'subscription' => $stripeSubId,
+            'customer' => 'cus_test_'.uniqid(),
+            'metadata' => [
+                'user_id' => $user->getId()->toRfc4122(),
+                'plan_id' => $plan->getId()->toRfc4122(),
+            ],
+        ]);
     }
 
     /**

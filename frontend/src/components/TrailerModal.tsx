@@ -6,8 +6,10 @@
  * ============================================================
  * Fenêtre modale dédiée à la lecture de la bande-annonce d'une œuvre, ouverte
  * depuis le hero des fiches films et séries (`WorkDetailHero`). La
- * bande-annonce est un manifeste HLS Bunny (`DiscoverWork.trailerUrl`), lu par
- * le même lecteur que les vidéos (`HlsPlayer`).
+ * bande-annonce (`DiscoverWork.trailerUrl`) est un manifeste HLS Bunny pour le
+ * contenu importé, ou le fichier vidéo lui-même (`…/trailer.mp4`) quand un
+ * studio l'a déposée ; les deux sont lus par le même lecteur que les vidéos
+ * (`HlsPlayer`).
  *
  * Choix de conception :
  * - Modale pilotée par React, sans le JavaScript de Bootstrap : l'état `open`
@@ -31,12 +33,18 @@ import { createPortal } from "react-dom";
 import HlsPlayer from "./HlsPlayer";
 
 /**
+ * URL d'un fichier vidéo à lire directement (bande-annonce déposée par un
+ * studio) plutôt que d'un manifeste HLS — mêmes extensions que l'upload studio.
+ */
+const DIRECT_VIDEO_FILE = /\.(mp4|mov|webm)$/i;
+
+/**
  * Propriétés attendues par le composant `TrailerModal`.
  */
 interface TrailerModalProps {
   /** État d'affichage de la modale (true = ouverte) */
   open: boolean;
-  /** URL du manifeste HLS de la bande-annonce */
+  /** URL de la bande-annonce : manifeste HLS ou fichier vidéo (MP4…) */
   src: string;
   /** Titre lisible de l'œuvre, affiché dans l'en-tête de la modale */
   title: string;
@@ -153,7 +161,11 @@ export default function TrailerModal({ open, src, title, poster, onClose }: Trai
               />
             </div>
             <div className="modal-body p-0">
-              <HlsPlayer src={src} autoplay poster={poster} />
+              {DIRECT_VIDEO_FILE.test(src) ? (
+                <HlsPlayer fallbackMp4={src} autoplay poster={poster} />
+              ) : (
+                <HlsPlayer src={src} autoplay poster={poster} />
+              )}
             </div>
           </div>
         </div>

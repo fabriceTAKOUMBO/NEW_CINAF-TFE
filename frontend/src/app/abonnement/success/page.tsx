@@ -6,10 +6,13 @@
 // ============================================================
 //
 // Comportement :
-//  - Si `?session_id=` présent : confirme le paiement via l'API backend
-//    (`GET /api/subscriptions/session/{id}`) puis poll `/auth/me` jusqu'à
-//    voir `hasActiveSubscription=true` (le webhook a un délai 1-3s).
+//  - Si `?session_id=` présent : `GET /api/subscriptions/session/{id}` lit le
+//    statut du paiement ET active l'abonnement côté serveur s'il est payé
+//    (sans attendre le webhook), puis poll `/auth/me` pour confirmer
+//    `hasActiveSubscription=true`.
 //  - Sinon : activation mock immédiate → refresh une fois.
+//  - « Abonnement activé » n'est affiché que si l'activation est confirmée ;
+//    sinon, état « activation en attente » avec un bouton pour revérifier.
 
 import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
@@ -29,13 +32,17 @@ function SuccessContent() {
   const [refreshing, setRefreshing] = useState<boolean>(Boolean(sessionId));
   const [sessionStatus, setSessionStatus] = useState<StripeSessionStatus | null>(null);
   const [sessionError, setSessionError] = useState<string | null>(null);
+  /** Incrémenté par « Vérifier à nouveau » pour relancer confirmation + polling. */
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
 
     async function confirmAndPoll() {
-      // Étape 1 : si retour Stripe, on récupère le statut réel de la session.
+      // Étape 1 : si retour Stripe, on récupère le statut réel de la session
+      // (le backend active l'abonnement à cette occasion si le paiement est accepté).
       if (sessionId) {
+        setSessionError(null);
         try {
           const status = await subscriptions.getSessionStatus(sessionId);
           if (!cancelled) setSessionStatus(status);
@@ -61,7 +68,7 @@ function SuccessContent() {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionId]);
+  }, [sessionId, attempt]);
 
   useEffect(() => {
     if (user?.hasActiveSubscription) {
@@ -71,6 +78,14 @@ function SuccessContent() {
 
   // Cas particulier : la session existe mais le paiement a échoué/n'est pas finalisé.
   const paymentFailed = sessionStatus !== null && sessionStatus.paymentStatus === "unpaid";
+  // Vérifications terminées sans confirmation : on ne prétend pas que l'accès est ouvert.
+  const pending = !paymentFailed && !refreshing && !user?.hasActiveSubscription;
+
+  /** Relance la confirmation côté serveur et le polling de /auth/me. */
+  const checkAgain = () => {
+    setRefreshing(true);
+    setAttempt((n) => n + 1);
+  };
 
   return (
     <div className="container py-5">
@@ -89,7 +104,7 @@ function SuccessContent() {
             height: 80,
             background: paymentFailed
               ? "rgba(220, 53, 69, 0.15)"
-              : refreshing
+              : refreshing || pending
               ? "rgba(200, 168, 75, 0.15)"
               : "rgba(40, 167, 69, 0.15)",
           }}
@@ -100,6 +115,8 @@ function SuccessContent() {
             <div className="spinner-border" role="status" style={{ color: "var(--cinaf-gold)" }}>
               <span className="visually-hidden">Activation en cours...</span>
             </div>
+          ) : pending ? (
+            <i className="bi bi-hourglass-split" style={{ fontSize: "2.5rem", color: "var(--cinaf-gold)" }} />
           ) : (
             <i className="bi bi-check-circle-fill" style={{ fontSize: "2.5rem", color: "#28a745" }} />
           )}
@@ -110,6 +127,8 @@ function SuccessContent() {
             ? "Paiement non confirmé"
             : refreshing
             ? "Activation de votre abonnement..."
+            : pending
+            ? "Activation en attente"
             : "Abonnement activé !"}
         </h1>
 
@@ -118,6 +137,13 @@ function SuccessContent() {
             ? "Votre paiement n'a pas été finalisé. Aucun montant n'a été débité. Vous pouvez retenter la souscription."
             : refreshing
             ? "Votre paiement a été reçu. Nous activons votre accès au catalogue, cela prend quelques secondes."
+            : pending
+            ? `${
+                // N'affirmer « paiement reçu » que si Stripe l'a réellement confirmé.
+                sessionStatus?.paymentStatus === "paid"
+                  ? "Votre paiement a bien été reçu par Stripe, mais l'activation de votre abonnement n'est pas encore confirmée."
+                  : "Nous n'avons pas encore pu confirmer votre paiement ni l'activation de votre abonnement."
+              } Vérifiez à nouveau dans quelques instants ; si le problème persiste, contactez-nous en indiquant la référence Stripe ci-dessous.`
             : "Votre paiement a été traité avec succès. Vous avez maintenant accès à l'intégralité du catalogue CINAF."}
         </p>
 
@@ -137,6 +163,16 @@ function SuccessContent() {
               <i className="bi bi-arrow-clockwise me-2" />
               Réessayer le paiement
             </Link>
+          ) : pending ? (
+            <button
+              type="button"
+              onClick={checkAgain}
+              className="btn fw-semibold px-4 py-2"
+              style={{ background: "var(--cinaf-gold)", color: "#000", borderRadius: 8 }}
+            >
+              <i className="bi bi-arrow-repeat me-2" />
+              Vérifier à nouveau
+            </button>
           ) : (
             <Link
               href="/catalogue"

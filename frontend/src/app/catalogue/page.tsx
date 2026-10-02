@@ -13,8 +13,10 @@ import WorksListView from "@/components/WorksListView";
  * 
  * Rôle :
  * - Présente l'ensemble des films et séries avec bascule par onglets (`showKindTabs`).
- * - Gère la pagination et la recherche plein texte via le composant réutilisable `WorksListView`.
- * 
+ * - Gère la pagination via le composant réutilisable `WorksListView`.
+ * - Pas de champ de recherche propre (`showSearch={false}`) : la recherche se
+ *   fait depuis la barre du menu principal, qui mène à la page `/recherche`.
+ *
  * @returns La vue catalogue complète.
  */
 export default function CataloguePage() {
@@ -31,8 +33,8 @@ export default function CataloguePage() {
         icon="bi-grid-3x3-gap-fill"
         kind={null}
         showKindTabs
+        showSearch={false}
         basePath="/catalogue"
-        searchPlaceholder="Rechercher un film ou une série…"
       />
     </Suspense>
   );

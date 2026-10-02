@@ -81,7 +81,8 @@ class Serie
     /**
      * Malgré son nom (hérité de Bunny Stream), contient un CHEMIN Bunny
      * Storage relatif à la zone (pas une URL) : celui de la bande-annonce,
-     * dont le catalogue public dérive l'URL HLS `{chemin}/master.m3u8`.
+     * dont le catalogue public dérive l'URL HLS `{chemin}/master.m3u8`, ou
+     * l'URL du fichier pour un upload studio (`trailer.mp4`).
      */
     #[ORM\Column(length: 500, nullable: true)]
     private ?string $trailerVideoId = null;

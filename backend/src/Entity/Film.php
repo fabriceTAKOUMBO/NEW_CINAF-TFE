@@ -94,7 +94,8 @@ class Film
      * Malgré son nom (hérité de Bunny Stream), contient un CHEMIN Bunny
      * Storage relatif à la zone (pas une URL, pas un GUID) : celui de la
      * bande-annonce. Le catalogue public en dérive l'URL HLS
-     * `{chemin}/master.m3u8`.
+     * `{chemin}/master.m3u8`, ou l'URL du fichier pour un upload studio
+     * (`trailer.mp4`).
      */
     #[ORM\Column(length: 500, nullable: true)]
     private ?string $trailerVideoId = null;

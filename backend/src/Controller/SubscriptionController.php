@@ -128,13 +128,17 @@ class SubscriptionController extends AbstractController
     }
 
     /**
-     * Endpoint utilisé par la page de retour Embedded Checkout pour afficher
-     * un statut immédiat (paid / unpaid) sans attendre le webhook.
+     * Endpoint appelé par la page de retour Embedded Checkout : renvoie le
+     * statut de la session (paid / unpaid) et, si le paiement est accepté,
+     * **active l'abonnement immédiatement**.
      *
-     * Simple lecture chez Stripe : n'écrit rien en base (seul le webhook crée
-     * l'abonnement). La contrainte de route n'accepte que des identifiants de
-     * session Checkout (`cs_…`). Aucune vérification ne rattache la session à
-     * l'utilisateur connecté.
+     * Avant le 2026-09-26, seul le webhook `checkout.session.completed` créait
+     * l'abonnement : s'il tardait ou n'arrivait pas (toujours le cas en local
+     * sans `stripe listen`), le client payait sans obtenir l'accès. L'activation
+     * passe par SubscriptionService::fulfillCheckoutSession() : réservée au
+     * propriétaire de la session (métadonnée `user_id`), idempotente avec le
+     * webhook. La contrainte de route n'accepte que des identifiants de session
+     * Checkout (`cs_…`).
      *
      * @return JsonResponse 200 `{status, paymentStatus, customerEmail}` ; 404 session
      *                      introuvable (ou toute erreur Stripe) ; 503 si Stripe est désactivé
@@ -150,6 +154,18 @@ class SubscriptionController extends AbstractController
         } catch (\Throwable) {
             return $this->json(['message' => 'Session introuvable.'], 404);
         }
+
+        /** @var User $user */
+        $user = $this->getUser();
+        try {
+            $this->subService->fulfillCheckoutSession($session, $user);
+        } catch (\Throwable $e) {
+            // Le statut reste renvoyé : le webhook pourra encore créer l'abonnement.
+            $this->logger->error('Activation au retour Stripe impossible : '.$e->getMessage(), [
+                'sessionId' => $sessionId,
+            ]);
+        }
+
         return $this->json([
             'status' => $session->status,                // 'open' | 'complete' | 'expired'
             'paymentStatus' => $session->payment_status, // 'paid' | 'unpaid' | 'no_payment_required'

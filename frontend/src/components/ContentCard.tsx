@@ -11,7 +11,7 @@
  * - Vignette d'affiche avec placeholder par défaut si aucune image n'est renseignée.
  * - Volet superposé (overlay) avec effet dégradé au survol dévoilant le titre,
  *   l'année, le genre principal, la durée en minutes et la note moyenne en étoiles.
- * - Lien cliquable redirigeant vers `/films/{id}` ou `/series/{id}`.
+ * - Lien cliquable redirigeant vers `/films/{slug}` ou `/series/{slug}`.
  */
 
 import Link from "next/link";
@@ -46,8 +46,10 @@ function isFilm(content: Film | Serie): content is Film {
  * @returns La carte cliquable
  */
 export default function ContentCard({ content, type }: ContentCardProps) {
-  // Détermination de l'URL de destination selon le type de contenu
-  const href = type === "film" ? `/films/${content.id}` : `/series/${content.id}`;
+  // Les fiches /films/[id] et /series/[id] chargent l'œuvre par son SLUG
+  // (discover.get) : un lien construit avec l'UUID (`content.id`) aboutissait
+  // toujours à « introuvable » depuis la page de recherche.
+  const href = type === "film" ? `/films/${content.slug}` : `/series/${content.slug}`;
   // Récupération du premier genre pour l'affichage rapide
   const mainGenre = content.genres?.[0]?.name;
 

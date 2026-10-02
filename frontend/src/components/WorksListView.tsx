@@ -10,7 +10,8 @@
  * - `/catalogue` : vue mixte proposant des onglets de filtrage (Tous / Films / Séries).
  * 
  * Fonctionnalités intégrées :
- * - Recherche en temps réel synchronisée avec l'URL (`?q=`).
+ * - Recherche en temps réel synchronisée avec l'URL (`?q=`), désactivable
+ *   (`showSearch`) : la page Catalogue s'en remet à la recherche du menu principal.
  * - Pagination serveur avec mise à jour du paramètre d'URL (`?page=`).
  * - Onglets de filtrage par format (`?kind=film` ou `?kind=serie`).
  * - Gestion complète des états d'interface : chargement, erreur, aucun résultat trouvé, grille de résultats.
@@ -38,6 +39,8 @@ interface WorksListViewProps {
   kind: DiscoverKind | null;
   /** Texte d'invite du champ de recherche */
   searchPlaceholder?: string;
+  /** Affiche le champ de recherche de la page (défaut : oui) */
+  showSearch?: boolean;
   /** Active l'affichage des onglets Tous / Films / Séries */
   showKindTabs?: boolean;
   /** Chemin de base pour la navigation paginée (ex: "/films") */
@@ -55,12 +58,15 @@ export default function WorksListView({
   icon = "bi-collection-play",
   kind,
   searchPlaceholder = "Rechercher une œuvre…",
+  showSearch = true,
   showKindTabs = false,
   basePath,
 }: WorksListViewProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const q = searchParams.get("q") || "";
+  // Sans champ de recherche, un `?q=` hérité d'un ancien lien est ignoré :
+  // la liste ne doit pas être filtrée sans que rien ne l'indique à l'écran.
+  const q = showSearch ? searchParams.get("q") || "" : "";
   const page = Math.max(1, Number(searchParams.get("page")) || 1);
   const tabKind = (searchParams.get("kind") as DiscoverKind | null) || null;
 
@@ -129,14 +135,16 @@ export default function WorksListView({
 
       {/* Barre d'outils : Recherche et onglets de sélection */}
       <div className="d-flex flex-wrap gap-3 align-items-center mb-4">
-        <div style={{ flex: "1 1 280px", maxWidth: 480 }}>
-          <SearchBar
-            mode="inline"
-            defaultValue={q}
-            onChange={(value) => updateParams({ q: value || undefined, page: undefined })}
-            placeholder={searchPlaceholder}
-          />
-        </div>
+        {showSearch && (
+          <div style={{ flex: "1 1 280px", maxWidth: 480 }}>
+            <SearchBar
+              mode="inline"
+              defaultValue={q}
+              onChange={(value) => updateParams({ q: value || undefined, page: undefined })}
+              placeholder={searchPlaceholder}
+            />
+          </div>
+        )}
 
         {showKindTabs && (
           <ul className="nav nav-pills" role="tablist">

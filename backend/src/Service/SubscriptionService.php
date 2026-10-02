@@ -7,13 +7,16 @@ use App\Entity\User;
 use App\Repository\SubscriptionPlanRepository;
 use App\Repository\SubscriptionRepository;
 use App\Repository\UserRepository;
+use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Component\Uid\Uuid;
 
 /**
  * Encapsule la logique métier des abonnements. Deux chemins :
  *  - `subscribe()` : activation immédiate côté serveur (mode mock / démo).
- *  - `syncFromStripeEvent()` : réconciliation depuis un webhook Stripe.
+ *  - Stripe : `fulfillCheckoutSession()` active l'abonnement dès le retour du
+ *    client après paiement, `syncFromStripeEvent()` réconcilie depuis les
+ *    webhooks. Les deux partagent la même création idempotente.
  *
  * S'y ajoutent les opérations communes aux deux modes : résiliation différée
  * (`cancel()`), réactivation (`resume()`), modification par un admin
@@ -232,8 +235,45 @@ class SubscriptionService
     }
 
     /**
+     * Active l'abonnement dès le retour du client sur la page de succès, sans
+     * attendre le webhook `checkout.session.completed`.
+     *
+     * Le webhook peut arriver en retard, ou jamais : en développement local,
+     * Stripe ne peut pas joindre le backend sans `stripe listen`, et le client
+     * se retrouvait avec un paiement accepté mais aucun abonnement. Stripe
+     * recommande d'activer aux deux endroits ; la création partagée avec le
+     * webhook est idempotente (même identifiant d'abonnement Stripe, index
+     * unique en base), donc le second signal ne fait rien.
+     *
+     * Garde-fous : la session doit appartenir à l'utilisateur connecté
+     * (métadonnée `user_id` posée par StripeService::createCheckoutSession()),
+     * être terminée (`complete`) et payée (`paid`, ou `no_payment_required`
+     * pour un essai gratuit).
+     *
+     * @param \Stripe\Checkout\Session $session Session relue chez Stripe (StripeService::retrieveCheckoutSession())
+     * @param User                     $user    Utilisateur connecté qui revient du paiement
+     *
+     * @return bool true si un abonnement vient d'être créé, false sinon (déjà
+     *              actif, session d'un autre utilisateur, paiement non abouti…)
+     */
+    public function fulfillCheckoutSession(\Stripe\Checkout\Session $session, User $user): bool
+    {
+        $metadataUserId = $session->metadata?->toArray()['user_id'] ?? null;
+        if ($metadataUserId === null || (string) $metadataUserId !== $user->getId()->toRfc4122()) {
+            return false;
+        }
+        if ($session->status !== 'complete'
+            || !\in_array($session->payment_status, ['paid', 'no_payment_required'], true)) {
+            return false;
+        }
+
+        return $this->handleCheckoutCompleted($session);
+    }
+
+    /**
      * checkout.session.completed → crée la Subscription en DB en mode ACTIVE.
-     * Idempotent : si stripeSubscriptionId est déjà en DB, on no-op.
+     * Idempotent : si stripeSubscriptionId est déjà en DB, on no-op. Partagée
+     * par le webhook et par fulfillCheckoutSession() (retour du client).
      *
      * L'utilisateur et le plan sont retrouvés grâce aux métadonnées `user_id` /
      * `plan_id` posées par StripeService::createCheckoutSession(). `endsAt` est
@@ -280,7 +320,16 @@ class SubscriptionService
         }
 
         $this->em->persist($sub);
-        $this->em->flush();
+        try {
+            $this->em->flush();
+        } catch (UniqueConstraintViolationException) {
+            // Le retour du client et le webhook sont arrivés en même temps :
+            // l'autre traitement a créé la ligne entre notre vérification et cet
+            // insert (index unique uniq_subscription_stripe_subscription). Rien
+            // à faire de plus. L'EntityManager est fermé après cet échec : les
+            // deux appelants n'écrivent plus rien ensuite dans la requête.
+            return false;
+        }
         return true;
     }
 

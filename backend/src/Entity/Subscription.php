@@ -12,18 +12,22 @@ use Symfony\Component\Uid\Uuid;
  * Conditionne la lecture des vidéos (`hasActiveSubscription` de
  * /api/auth/me, contrôle can-play du catalogue). Créé et mis à jour par
  * SubscriptionService : activation immédiate en mode simulé
- * (STRIPE_ENABLED=false), ou création au webhook Stripe
- * `checkout.session.completed` puis synchronisation par les webhooks suivants.
+ * (STRIPE_ENABLED=false), ou, avec Stripe, création au premier des deux
+ * signaux de paiement — retour du client sur la page de succès, ou webhook
+ * `checkout.session.completed` — puis synchronisation par les webhooks suivants.
  *
  * Un utilisateur n'a normalement qu'un abonnement ACTIVE à la fois : souscrire
  * à un nouveau plan passe le précédent en CANCELED. L'historique est conservé
  * (les lignes remplacées ne sont pas supprimées). L'index (user_id, status)
- * accélère la recherche de l'abonnement courant.
+ * accélère la recherche de l'abonnement courant ; l'index unique sur
+ * `stripe_subscription_id` garantit qu'un abonnement Stripe ne donne qu'une
+ * seule ligne, même si le retour du client et le webhook arrivent ensemble.
  */
 #[ORM\Entity(repositoryClass: SubscriptionRepository::class)]
 #[ORM\Table(name: 'subscription')]
 #[ORM\HasLifecycleCallbacks]
 #[ORM\Index(columns: ['user_id', 'status'], name: 'idx_subscription_user_status')]
+#[ORM\UniqueConstraint(name: 'uniq_subscription_stripe_subscription', columns: ['stripe_subscription_id'])]
 class Subscription
 {
     /**
@@ -78,7 +82,10 @@ class Subscription
     #[ORM\Column(nullable: true)]
     private ?\DateTimeImmutable $canceledAt = null;
 
-    /** Identifiant de l'abonnement Stripe ; clé de réconciliation des webhooks (null en mode simulé). */
+    /**
+     * Identifiant de l'abonnement Stripe ; clé de réconciliation des webhooks
+     * (null en mode simulé). Unique en base (index `uniq_subscription_stripe_subscription`).
+     */
     #[ORM\Column(length: 100, nullable: true)]
     private ?string $stripeSubscriptionId = null;
 

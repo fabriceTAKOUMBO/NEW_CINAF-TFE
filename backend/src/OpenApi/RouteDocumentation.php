@@ -101,7 +101,7 @@ final class RouteDocumentation
             ],
             'GET /api/catalogue/discover/{slug}' => [
                 'tag' => $discover,
-                'summary' => "Détail d'une œuvre : saisons, épisodes et URL de lecture HLS",
+                'summary' => "Détail d'une œuvre : saisons, épisodes et URL de lecture (HLS, ou MP4 pour une vidéo déposée par un studio)",
                 'responses' => [
                     404 => 'Œuvre inconnue, ou jamais publiée (brouillon, en attente)',
                     410 => 'Œuvre retirée de la plateforme : {message, status: WITHDRAWN, kind, title}',
@@ -178,7 +178,7 @@ final class RouteDocumentation
             ],
             'GET /api/subscriptions/session/{sessionId}' => [
                 'tag' => $subscriptions,
-                'summary' => "Statut d'une session Stripe Checkout (page de retour après paiement)",
+                'summary' => "Statut d'une session Stripe Checkout, et activation de l'abonnement si le paiement est accepté (page de retour)",
                 'responses' => [503 => 'Stripe désactivé sur cette instance'],
             ],
             'POST /api/subscriptions/cancel' => [
